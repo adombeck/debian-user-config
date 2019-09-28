@@ -1,31 +1,38 @@
-# Add mountpoints to fstab
-function ensure_mount_point_exists {	
-	src=$1
-	mountpoint=$2
-	[ -e "$mountpoint" ] && return
-	if [ -d "$src" ]; then
-		sudo mkdir "$mountpoint"
-	else
-		sudo touch "$mountpoint"
-	fi
-}
+#!/bin/bash
 
-function add_to_fstab {
-	src=$1
-	mountpoint=$2
-	grep -q "$src" /etc/fstab || echo "$src $mountpoint none defaults,bind 0 0" | sudo tee -a /etc/fstab > /dev/null
-}
+set -e
+set -u
 
-for f in $DIR/.[!.]*; do
-	if [[ "$f" == "$DIR/.git"* ]] || [[ "$f" == "$DIR/.nfs"* ]]; then
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+for f in "$DIR"/.[!.]*; do
+	if [[ "$f" == "$DIR/.gitmodules" ]] || [[ "$f" == "$DIR/.nfs"* ]]; then
 		echo "Skipping $f"
 		continue
 	fi
-	mountpoint="$(realpath ~/$(basename $f))"
-	echo "Installing $f to $mountpoint"
-	ensure_mount_point_exists $f $mountpoint
-	add_to_fstab $f $mountpoint
-done
 
-echo "Run \`sudo mount -a\` to complete the installation"
+    # Check if the dotfile is already present in the home directory
+    target="$HOME/$(basename "$f")"
+    if [ -L "${target}" ]; then
+        # The file is a symlink, so it's probably safe to just delete it.
+		echo "Updating symlink for $f"
+        rm "${target}"
+	    ln -s "$f" "$HOME"
+		continue
+    fi
+
+    if [ -f "${target}" ]; then
+		echo -e "The file ${target} already exists.\nDo you want to move the file to ${target}.orig? Else it will be skipped. (y/N) "
+		read
+		if [ "$REPLY" != "y" ]; then
+		    echo "Skipping $f"
+            continue
+        else
+            mv -i "${target}" "${target}.orig"
+        fi
+    fi
+
+	echo "Creating symlink for $f"
+	ln -s "$f" "$HOME"
+done
 
