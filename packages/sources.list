@@ -1,0 +1,3 @@
+deb tor+http://vwakviie2ienjx6t.onion/debian sid main contrib non-free
+deb-src tor+http://vwakviie2ienjx6t.onion/debian sid main contrib non-free
+

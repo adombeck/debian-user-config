@@ -1,0 +1,52 @@
+[apps/guake/general]
+prompt-on-quit=true
+window-height=74
+mouse-display=true
+window-width=50
+window-valignment=1
+max-tab-name-length=100
+gtk-theme-name='Default'
+gtk-prefer-dark-theme=false
+window-losefocus=false
+history-size=10000
+open-tab-cwd=true
+window-tabbar=true
+start-at-login=true
+quick-open-command-line='gedit %(file_path)s'
+compat-delete='delete-sequence'
+scroll-keystroke=true
+abbreviate-tab-names=false
+display-n=0
+use-audible-bell=false
+use-default-font=false
+use-trayicon=true
+use-scrollbar=true
+window-halignment=2
+use-popup=true
+window-refocus=false
+
+[apps/guake/keybindings/local]
+toggle-fullscreen='disabled'
+close-tab='<Primary>w'
+new-tab='<Primary>t'
+
+[apps/guake/keybindings/global]
+show-focus='F11'
+show-hide='F10'
+
+[apps/guake/style/background]
+transparency=96
+
+[apps/guake/style/font]
+allow-bold=true
+style='Monospace 9'
+palette='#000000000000:#cccc00000000:#4e4e9a9a0606:#c4c4a0a00000:#34346565a4a4:#757550507b7b:#060698209a9a:#d3d3d7d7cfcf:#2e2e34343636:#efef29292929:#8a8ae2e23434:#fcfce9e94f4f:#72729f9fcfcf:#adad7f7fa8a8:#3434e2e2e2e2:#eeeeeeeeecec:#ffffffffffff:#2e2e34343636'
+palette-name='Custom'
+
+[org/gnome/settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0]
+binding='F10'
+command='guake --toggle'
+name='Toggle Guake'

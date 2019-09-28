@@ -1,0 +1,19 @@
+[shell]
+enabled-extensions=['places-menu@gnome-shell-extensions.gcampax.github.com', 'alternate-tab@gnome-shell-extensions.gcampax.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'window-list@gnome-shell-extensions.gcampax.github.com']
+
+[desktop/interface]
+clock-show-date=true
+show-battery-percentage=true
+
+[desktop/sound]
+allow-volume-above-100-percent=true
+
+[desktop/wm/preferences]
+button-layout='appmenu:minimize,maximize,close'
+
+[settings-daemon/plugins/xsettings]
+overrides={'Gtk/ShellShowsAppMenu': <1>}
+
+[settings-daemon/plugins/color]
+night-light-enabled=true
+
