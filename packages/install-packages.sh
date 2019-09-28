@@ -1,12 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
-sudo apt install \
-	vim \
-	zsh \
-	tor \
-	torbrowser-launcher \
-	firefox \
-	flatpak \
-	debianutils \
-	gnome \
-	apt-file \
+set -eu
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+packages="$(grep -v "^#" "$DIR/packages.list")"
+echo "$packages" | xargs --open-tty sudo apt-get install
+
