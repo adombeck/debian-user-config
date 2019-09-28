@@ -1,0 +1,8 @@
+[core]
+	editor = vim
+	excludesfile = /home/user/.gitignore
+[pager]
+	diff = true
+	branch = false
+[submodule]
+	recurse = true
