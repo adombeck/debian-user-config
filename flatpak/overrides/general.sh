@@ -3,5 +3,5 @@
 # First, remove all existing --user settings
 flatpak override --user --reset
 
-# Commented out because there is currently no use case
-#flatpak override --user --filesystem=~/flatpak-shared-ro:ro
+# Allow read-only access to the ~/flatpak-shared-ro directory
+flatpak override --user --filesystem=~/flatpak-shared-ro:ro

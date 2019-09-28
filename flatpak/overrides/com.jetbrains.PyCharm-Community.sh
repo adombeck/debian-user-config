@@ -1,10 +1,14 @@
 #!/bin/bash
 
-# First, remove all existing --user settings for com.jetbrains.PyCharm-Community
-flatpak override --user --reset com.jetbrains.PyCharm-Community
+set -eu
 
-# Don't allow access to /home
-# flatpak override --user --nofilesystem=/home/ com.jetbrains.PyCharm-Community
+APP="com.jetbrains.PyCharm-Community"
+
+# First, remove all existing --user settings for the app
+flatpak override --user --reset "$APP"
+
+# Don't allow access to $HOME
+# flatpak override --user --nofilesystem=home "$APP"
 
 # Make PyCharm search the custom girepository-1.0 for typelibs for stub 
 # generation.
@@ -12,4 +16,4 @@ flatpak override --user --reset com.jetbrains.PyCharm-Community
 #
 #    cp -a /usr/lib/x86_64-linux-gnu/girepository-1.0 ~/flatpak-shared-ro/
 #
-flatpak override --user --env=PYTHONPATH="$HOME/flatpak-shared-ro/girepository-1.0" com.jetbrains.PyCharm-Community
+flatpak override --user --env=PYTHONPATH="$HOME/flatpak-shared-ro/girepository-1.0" "$APP"
