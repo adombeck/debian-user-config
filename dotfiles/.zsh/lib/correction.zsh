@@ -1,14 +1,14 @@
-setopt correct_all
+if [[ "$ENABLE_CORRECTION" == "true" ]]; then
+  alias cp='nocorrect cp'
+  alias ebuild='nocorrect ebuild'
+  alias gist='nocorrect gist'
+  alias heroku='nocorrect heroku'
+  alias hpodder='nocorrect hpodder'
+  alias man='nocorrect man'
+  alias mkdir='nocorrect mkdir'
+  alias mv='nocorrect mv'
+  alias mysql='nocorrect mysql'
+  alias sudo='nocorrect sudo'
 
-alias cap='nocorrect cap'
-alias man='nocorrect man'
-alias tree='nocorrect tree'
-alias thor='nocorrect thor'
-alias mv='nocorrect mv'
-alias mysql='nocorrect mysql'
-alias mkdir='nocorrect mkdir'
-alias gist='nocorrect gist'
-alias heroku='nocorrect heroku'
-alias ebuild='nocorrect ebuild'
-alias hpodder='nocorrect hpodder'
-alias vim='nocorrect vim'
+  setopt correct_all
+fi
