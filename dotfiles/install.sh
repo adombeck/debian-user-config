@@ -21,7 +21,7 @@ for f in "$DIR"/.[!.]*; do
 		continue
     fi
 
-    if [ -f "${target}" ]; then
+    if [ -e "${target}" ]; then
 		echo -e "The file ${target} already exists.\nDo you want to move the file to ${target}.orig? Else it will be skipped. (y/N) "
 		read
 		if [ "$REPLY" != "y" ]; then
