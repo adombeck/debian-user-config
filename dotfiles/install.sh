@@ -36,3 +36,10 @@ for f in "$DIR"/.[!.]*; do
 	ln -s "$f" "$HOME"
 done
 
+read -p "Do you want to set zsh as your default shell? (Y/n)"
+if [ "$REPLY" != "n" ]; then
+	if sudo chsh $USER -s /usr/bin/zsh; then
+		echo "Done. zsh will be your default shell the next time you log in."
+	fi
+fi
+
