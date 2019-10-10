@@ -1,8 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 
 set -e
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 sudo apt-get install -y guake
 
-dconf load / < guake.dconf
+echo "Loading guake config"
+dconf load / < "$DIR/guake.dconf"
 
