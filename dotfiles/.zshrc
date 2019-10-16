@@ -53,3 +53,6 @@ unsetopt BEEP
 
 # Share history betweeh zsh shells
 setopt share_history
+
+# Set the EDITOR variable to vim
+export EDITOR=vim
