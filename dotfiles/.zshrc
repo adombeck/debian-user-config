@@ -12,8 +12,10 @@ plugins=(bgnotify)
 
 source $ZSH/oh-my-zsh.sh
 
-if [ -f ~/.zshrc.local ]; then
-    source ~/.zshrc.local
+if [ -d ~/.zshrc.d ]; then
+    for f in ~/.zshrc.d/*(N); do
+        source "$f"
+    done
 fi
 
 # Extend Autocomplete Search Path

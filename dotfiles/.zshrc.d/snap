@@ -1,0 +1,3 @@
+# Add /snap/bin to PATH
+export PATH=$PATH:/snap/bin
+
