@@ -8,6 +8,12 @@ show-battery-percentage=true
 [desktop/sound]
 allow-volume-above-100-percent=true
 
+[desktop/wm/keybindings]
+switch-applications=['<Super>Tab']
+switch-applications-backward=['<Shift><Super>Tab']
+switch-windows=['<Alt>Tab']
+switch-windows-backward=['<Shift><Alt>Tab']
+
 [desktop/wm/preferences]
 button-layout='appmenu:minimize,maximize,close'
 
