@@ -59,3 +59,6 @@ export EDITOR=vim
 
 # Disable caps lock
 setxkbmap -option caps:none
+
+# Disable paste magic
+DISABLE_MAGIC_FUNCTIONS=1
