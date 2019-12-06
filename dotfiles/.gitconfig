@@ -6,3 +6,5 @@
 	branch = false
 [submodule]
 	recurse = true
+[color "diff"]
+    old = 9
