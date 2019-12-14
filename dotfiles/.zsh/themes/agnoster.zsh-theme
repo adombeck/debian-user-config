@@ -95,6 +95,9 @@ prompt_context() {
 
 # Git: branch/detached head, dirty status
 prompt_git() {
+  if [[ "$PWD" =~ "debian-thunderbird" ]]; then
+    return
+  fi
   (( $+commands[git] )) || return
   if [[ "$(git config --get oh-my-zsh.hide-status 2>/dev/null)" = 1 ]]; then
     return
@@ -161,6 +164,10 @@ prompt_bzr() {
 }
 
 prompt_hg() {
+  if [[ "$PWD" =~ "mozilla-central" ]]; then
+    return
+  fi
+
   (( $+commands[hg] )) || return
   local rev st branch
   if $(hg id >/dev/null 2>&1); then
