@@ -1,0 +1,55 @@
+# Core
+[submodule "dotfiles/.vim/bundle/pathogen"]
+        path = dotfiles/.vim/bundle/vim-pathogen
+        url = https://github.com/tpope/vim-pathogen.git
+
+[submodule "dotfiles/.vim/bundle/ackdotfiles/.vim"]
+        path = dotfiles/.vim/bundle/ackdotfiles/.vim
+        url = https://github.com/mileszs/ackdotfiles/.vim.git
+
+[submodule "dotfiles/.vim/bundle/delimitMate"]
+        path = dotfiles/.vim/bundle/delimitMate
+        url = https://github.com/Raimondi/delimitMate.git
+
+[submodule "dotfiles/.vim/bundle/nerdcommenter"]
+        path = dotfiles/.vim/bundle/nerdcommenter
+        url = https://github.com/scrooloose/nerdcommenter.git
+
+[submodule "dotfiles/.vim/bundle/nerdtree"]
+        path = dotfiles/.vim/bundle/nerdtree
+        url = https://github.com/scrooloose/nerdtree.git
+
+[submodule "dotfiles/.vim/bundle/supertab"]
+        path = dotfiles/.vim/bundle/supertab
+        url = https://github.com/ervandew/supertab.git
+
+[submodule "dotfiles/.vim/bundle/markdown"]
+        path = dotfiles/.vim/bundle/vim-markdown
+        url = https://github.com/tpope/vim-markdown.git
+
+[submodule "dotfiles/.vim/bundle/syntastic"]
+        path = dotfiles/.vim/bundle/syntastic
+        url = https://github.com/scrooloose/syntastic.git
+
+[submodule "dotfiles/.vim/bundle/vim-javascript-syntax"]
+        path = dotfiles/.vim/bundle/vim-javascript-syntax
+        url = https://github.com/jelera/vim-javascript-syntax.git
+
+[submodule "dotfiles/.vim/bundle/JavaScript-Indent"]
+        path = dotfiles/.vim/bundle/JavaScript-Indent
+        url = https://github.com/vim-scripts/JavaScript-Indent.git
+[submodule "dotfiles/.vim/bundle/ctrlpdotfiles/.vim"]
+	path = dotfiles/.vim/bundle/ctrlpdotfiles/.vim
+	url = https://github.com/ctrlpvim/ctrlpdotfiles/.vim.git
+[submodule "dotfiles/.vim/bundle/vim-erlang-compiler"]
+	path = dotfiles/.vim/bundle/vim-erlang-compiler
+	url = https://github.com/vim-erlang/vim-erlang-compiler.git
+[submodule "dotfiles/.vim/bundle/vim-go"]
+	path = dotfiles/.vim/bundle/vim-go
+	url = https://github.com/fatih/vim-go.git
+[submodule "dotfiles/.vim/bundle/vim-gitgutter"]
+	path = dotfiles/.vim/bundle/vim-gitgutter
+	url = https://github.com/airblade/vim-gitgutter.git
+[submodule "dotfiles/.vim/bundle/auto-pairs"]
+	path = dotfiles/.vim/bundle/auto-pairs
+	url = https://github.com/jiangmiao/auto-pairs.git
