@@ -11,48 +11,48 @@ maybe_create_symlink() {
   echo "target: $target"
 
   if [[ "$f" == "$DIR/.gitmodules" ]] || [[ "${source}" == "$DIR/.nfs"* ]]; then
-		echo "Skipping ${source}"
-		return
-	fi
+    echo "Skipping ${source}"
+    return
+  fi
 
-	# If the target is a .d directory, create symlinks for the config
-	# files in the directory, instead of for the directory itself.
-	# This allows the user to still put their own config files in there
-	# without committing them to to git.
-	if [ -d "${source}" ] && [ "${source: -2}" = ".d" ]; then
-	  mkdir -p "${target}"
-	  for f in "${source}"/*; do
-	    maybe_create_symlink "$f"
-	  done
-	  return
-	fi
+  # If the target is a .d directory, create symlinks for the config
+  # files in the directory, instead of for the directory itself.
+  # This allows the user to still put their own config files in there
+  # without committing them to to git.
+  if [ -d "${source}" ] && [ "${source: -2}" = ".d" ]; then
+    mkdir -p "${target}"
+    for f in "${source}"/*; do
+      maybe_create_symlink "$f"
+    done
+    return
+  fi
 
   # Check if the dotfile is already present in the home directory
   if [ -L "${target}" ]; then
-      # The file is a symlink, so it's probably safe to just delete it.
-  echo "Updating symlink for ${source}"
-      rm "${target}"
+    # The file is a symlink, so it's probably safe to just delete it.
+    echo "Updating symlink for ${source}"
+    rm "${target}"
     ln -s "${source}" "${target}"
-  return
+    return
   fi
 
   if [ -e "${target}" ]; then
-  echo -e "The file ${target} already exists.\nDo you want to move the file to ${target}.orig? Else it will be skipped. (y/N) "
-  read
-  if [ "$REPLY" != "y" ]; then
+    echo -e "The file ${target} already exists.\nDo you want to move the file to ${target}.orig? Else it will be skipped. (y/N) "
+    read
+    if [ "$REPLY" != "y" ]; then
       echo "Skipping ${source}"
-          return
-      else
-          mv -i "${target}" "${target}.orig"
-      fi
+      return
+    else
+      mv -i "${target}" "${target}.orig"
+    fi
   fi
 
-	echo "Creating symlink for ${source}"
-	ln -s "${source}" "${target}"
+  echo "Creating symlink for ${source}"
+  ln -s "${source}" "${target}"
 }
 
 for f in "$DIR"/.[!.]*; do
-	maybe_create_symlink "$f"
+  maybe_create_symlink "$f"
 done
 
 # Set zsh as the default shell
