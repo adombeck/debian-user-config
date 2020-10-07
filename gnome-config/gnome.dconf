@@ -1,6 +1,9 @@
 [shell]
 enabled-extensions=['places-menu@gnome-shell-extensions.gcampax.github.com', 'alternate-tab@gnome-shell-extensions.gcampax.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'window-list@gnome-shell-extensions.gcampax.github.com']
 
+[desktop/input-sources]
+xkb-options=['caps:none']
+
 [desktop/interface]
 clock-show-date=true
 show-battery-percentage=true
@@ -22,4 +25,5 @@ overrides={'Gtk/ShellShowsAppMenu': <1>}
 
 [settings-daemon/plugins/color]
 night-light-enabled=true
+
 
