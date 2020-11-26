@@ -56,3 +56,6 @@ setopt share_history
 
 # Set the EDITOR variable to vim
 export EDITOR=vim
+
+# Disable caps lock
+setxkbmap -option caps:none
