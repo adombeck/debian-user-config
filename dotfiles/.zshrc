@@ -66,3 +66,6 @@ DISABLE_MAGIC_FUNCTIONS=1
 # Set a high history size
 HISTSIZE=500000
 SAVEHIST=100000
+
+# Enable thefuck
+eval $(thefuck --alias)
