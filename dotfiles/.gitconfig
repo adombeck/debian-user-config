@@ -1,6 +1,8 @@
 [core]
 	editor = vim
 	excludesfile = /home/user/.gitignore
+[branch]
+	autosetuprebase = always
 [pager]
 	diff = true
 	branch = false
