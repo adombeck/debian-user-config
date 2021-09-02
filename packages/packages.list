@@ -1,13 +1,13 @@
-vim
-zsh
-tor
-torbrowser-launcher
+apt-file
+debianutils
 firefox
 flatpak
-debianutils
 gnome
-apt-file
 guake
+tor
+torbrowser-launcher
+vim
+zsh
 
 # For the zsh agnoster theme
 fonts-powerline
