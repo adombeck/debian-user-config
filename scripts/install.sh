@@ -5,16 +5,33 @@ set -u
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-for f in "${DIR}"/*; do
-	if [ "$(basename "$f")" == "$(basename "$0")" ]; then
-		continue
-	fi
-	target="/usr/local/bin/$(realpath --no-symlinks --relative-to="${DIR}" "$f")"
-	if [ -e "${target}" ]; then
-		continue
-	fi
+function install() {
+	local dir=$1
+	for f in "$dir"/*; do
+	  # Don't copy this script itself
+	  if [ "$(basename "$f")" == "$(basename "$0")" ]; then
+		  continue
+	  fi
 
-	# Install the script
-	sudo ln -s "$f" "${target}"
-done
+	  # Recurse into directories
+	  if [ -d "$f" ]; then
+	    install "$f"
+	    continue
+	  fi
 
+	  # Install regular files to /usr/local/bin
+	  local target
+	  target="/usr/local/bin/$(basename "$f")"
+    if [ -e "${target}" ]; then
+      # Don't overwrite existing files
+      echo "scripts: Skipping $target, already exists"
+      continue
+    fi
+
+    # Install the script
+    echo "scripts: Creating symlink $target -> $f"
+	  sudo ln -s "$f" "${target}"
+  done
+}
+
+install "${DIR}"
