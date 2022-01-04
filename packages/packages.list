@@ -1,6 +1,7 @@
 apt-file
 bat
 debianutils
+devscripts
 fd-find
 firefox
 flatpak
