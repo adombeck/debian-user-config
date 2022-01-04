@@ -9,7 +9,7 @@ for f in "${DIR}"/*; do
 	if [ "$(basename "$f")" == "$(basename "$0")" ]; then
 		continue
 	fi
-	target="/usr/local/bin/$(realpath --relative-to="${DIR}" "$f")"
+	target="/usr/local/bin/$(realpath --no-symlinks --relative-to="${DIR}" "$f")"
 	if [ -e "${target}" ]; then
 		continue
 	fi
