@@ -2,6 +2,7 @@ apt-file
 debianutils
 firefox
 flatpak
+fzf
 gnome
 guake
 thefuck
