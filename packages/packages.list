@@ -1,10 +1,13 @@
 apt-file
+bat
 debianutils
+fd-find
 firefox
 flatpak
 fzf
 gnome
 guake
+ripgrep
 thefuck
 tor
 torbrowser-launcher
