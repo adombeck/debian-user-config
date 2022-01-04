@@ -69,3 +69,10 @@ SAVEHIST=100000
 
 # Enable thefuck
 eval $(thefuck --alias)
+
+# Enable fzf shell extensions
+source /usr/share/doc/fzf/examples/completion.zsh
+source /usr/share/doc/fzf/examples/key-bindings.zsh
+bindkey '^F' fzf-file-widget
+export FZF_DEFAULT_COMMAND='fdfind --type f --hidden --follow --exclude .git'
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
