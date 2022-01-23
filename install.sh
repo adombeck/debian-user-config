@@ -12,8 +12,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 "$DIR/dotfiles/install.sh"
 
 # Install and configure flatpaks
-"$DIR/flatpaks/install-flatpaks.sh"
-"$DIR/flatpaks/apply-overrides.sh"
+"$DIR/flatpak/install-flatpaks.sh"
+"$DIR/flatpak/apply-overrides.sh"
 
 # Configure GNOME
 "$DIR/gnome-config/install.sh"
