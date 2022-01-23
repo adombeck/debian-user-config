@@ -8,6 +8,9 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 "$DIR/packages/install-sources.sh"
 "$DIR/packages/install-packages.sh"
 
+# Install my scripts
+"$DIR/scripts/install.sh"
+
 # Install dotfiles
 "$DIR/dotfiles/install.sh"
 
