@@ -2,7 +2,7 @@
 
 set -eu
 
-cat << EOF
+cat <<EOF
 WARNING: This script will:
  * install Debian unstable sources
  * upgrade all packages to Debian unstable
@@ -11,19 +11,18 @@ EOF
 
 read
 if [ "$REPLY" != "y" ]; then
-	exit 1
+  exit 1
 fi
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 sudo apt install apt-transport-tor
 
-if [ -f /etc/apt/sources.list ]; then
-	sudo mv -i /etc/apt/sources.list /etc/apt/sources.list.orig
+if ! [ -L /etc/apt/sources.list ] && [ -f /etc/apt/sources.list ]; then
+  sudo mv -i /etc/apt/sources.list /etc/apt/sources.list.orig
 fi
 
 sudo chown root:root "$DIR/sources.list"
-sudo ln -s "$DIR/sources.list" /etc/apt/sources.list
+sudo ln -sf "$DIR/sources.list" /etc/apt/sources.list
 
 sudo apt-get update && sudo apt-get dist-upgrade -y
-
