@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eu
+
 cat << EOF
 WARNING: This script will:
  * install Debian unstable sources
@@ -20,7 +22,8 @@ if [ -f /etc/apt/sources.list ]; then
 	sudo mv -i /etc/apt/sources.list /etc/apt/sources.list.orig
 fi
 
-cp "$DIR/sources.list" /etc/apt/sources.list
+sudo chown root:root "$DIR/sources.list"
+sudo ln -s "$DIR/sources.list" /etc/apt/sources.list
 
 sudo apt-get update && sudo apt-get dist-upgrade -y
 
