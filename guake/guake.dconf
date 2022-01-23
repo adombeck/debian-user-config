@@ -31,7 +31,6 @@ close-tab='<Primary>w'
 new-tab='<Primary>t'
 
 [apps/guake/keybindings/global]
-show-focus='F11'
 show-hide='F10'
 
 [apps/guake/style/background]
