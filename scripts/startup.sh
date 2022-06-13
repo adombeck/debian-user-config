@@ -1,4 +1,4 @@
-/home/user/scripts/screenlock-watcher.sh &
+screenlock-watcher.sh &
 
 if zenity --question --text "Run startup applications?"; then
 	keepassxc &
