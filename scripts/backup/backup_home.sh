@@ -9,12 +9,10 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+DIR=$(dirname "$(readlink -f "$0")")
 
 # Unlock and mount backup_external
-if ! dmsetup info backup_external; then
-  cryptsetup open --type tcrypt --veracrypt /dev/disk/by-id/usb-Seagate_Expansion_NA8KRRYV-0:0 backup_external
-  mount /dev/mapper/backup_external /media/backup_external
-fi
+"${DIR}/unlock_and_mount_backup_external.sh"
 
 # Create a new borg backup
 LABEL=${LABEL:-$(date +%Y-%m-%d)}
