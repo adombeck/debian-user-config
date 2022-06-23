@@ -10,3 +10,5 @@
 	recurse = true
 [color "diff"]
     old = 9
+[init]
+	defaultBranch = main
