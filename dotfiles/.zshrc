@@ -76,3 +76,8 @@ source /usr/share/doc/fzf/examples/key-bindings.zsh
 bindkey '^F' fzf-file-widget
 export FZF_DEFAULT_COMMAND='fdfind --type f --hidden --follow --exclude .git'
 export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+
+# To be able to execute shell history via enter and copy it to the
+# command-line on left/right arrow key. Only works in combination
+# with my 0001-execute-history-by-default patch.
+FZF_CTRL_R_OPTS="--expect=left --expect=right"
