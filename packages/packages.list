@@ -8,6 +8,8 @@ flatpak
 fzf
 glances
 gnome
+gnome-shell-extension-appindicator
+gnome-shell-extension-caffeine
 guake
 ripgrep
 silversearcher-ag
@@ -15,6 +17,7 @@ thefuck
 tor
 torbrowser-launcher
 vim
+wget
 zsh
 
 # For the zsh agnoster theme
