@@ -3,6 +3,7 @@ bat
 dconf-editor
 debianutils
 devscripts
+d-feet
 fd-find
 file-roller
 firefox
@@ -17,8 +18,12 @@ gnome-shell-extension-caffeine
 gnome-tweaks
 guake
 htop
+keepassxc
+meld
+mosh
 ncdu
 ripgrep
+rsync
 silversearcher-ag
 thefuck
 tor
