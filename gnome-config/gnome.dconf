@@ -1,5 +1,5 @@
 [shell]
-enabled-extensions=['places-menu@gnome-shell-extensions.gcampax.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'window-list@gnome-shell-extensions.gcampax.github.com', 'appindicatorsupport@rgcjonas.gmail.com', 'clipboard-history@alexsaveau.dev']
+enabled-extensions=['places-menu@gnome-shell-extensions.gcampax.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'clipboard-history@alexsaveau.dev', 'window-list@gnome-shell-extensions.gcampax.github.com', 'ubuntu-appindicators@ubuntu.com']
 
 [desktop/input-sources]
 xkb-options=['caps:none']
