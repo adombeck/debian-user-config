@@ -1,0 +1,192 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-02-23 12:15-0800\n"
+"PO-Revision-Date: 2021-10-15 09:50+0330\n"
+"Last-Translator: eshagh <eshagh094@gmail.com>\n"
+"Language-Team: \n"
+"Language: fa\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.0\n"
+"Plural-Forms: nplurals=2; plural=(n==0 || n==1);\n"
+
+#: extension.js:121
+#, fuzzy
+msgid "Search clipboard history…"
+msgstr "تاریخچهٔ تخته‌گیره پاک شد"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "حالت خصوصی"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr "همه پاک شوند؟"
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr "آیا از حذف همه موارد تخته‌گیره مطمئنید؟"
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr "این عملیات قابل بازگردانی نیست."
+
+#: extension.js:532
+msgid "Clear"
+msgstr "پاک‌کردن"
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr "لغو"
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "رونوشت به تخته‌گیره"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr ""
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "تغییر وضعیت فهرست"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "پاک‌کردن تاریخچه"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "ورودی قبلی"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "ورودی بعدی"
+
+#: prefs.js:120
+#, fuzzy
+msgid "Toggle private mode"
+msgstr "حالت خصوصی"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr ""
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr ""
+
+#: prefs.js:139
+#, fuzzy
+msgid "Max clipboard history size (MiB)"
+msgstr "تاریخچهٔ تخته‌گیره پاک شد"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr ""
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "نمایش آگاهی هنگام رونوشت"
+
+#: prefs.js:154
+#, fuzzy
+msgid "Ask for confirmation before clearing history"
+msgstr "نمایش آگاهی هنگام رونوشت"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr ""
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "میان‌بر صفحه‌کلید"
+
+#: prefs.js:169
+#, fuzzy
+msgid "Number of characters in status bar"
+msgstr "تعداد نویسه‌ها در نوار بالا"
+
+#: prefs.js:174
+#, fuzzy
+msgid "What to show in status bar"
+msgstr "چه‌چیزی در نوار بالا دیده شود"
+
+#: prefs.js:179
+#, fuzzy
+msgid "Remove down arrow in status bar"
+msgstr "برداشتن فلش روبه پایین در نوار بالا"
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr "برداشتن فاصلهٔ اطراف متن"
+
+#: prefs.js:189
+msgid "Paste on selection"
+msgstr ""
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr ""
+
+#: prefs.js:326
+msgid "Icon"
+msgstr "نقشک"
+
+#: prefs.js:327
+#, fuzzy
+msgid "Clipboard contents"
+msgstr "محتویات تخته‌گیره"
+
+#: prefs.js:328
+msgid "Both"
+msgstr "هر دو"
+
+#: prefs.js:329
+msgid "Neither"
+msgstr ""
+
+#, fuzzy
+#~ msgid "Type here to search…"
+#~ msgstr "برای جست‌وجو اینجا بنویسید..."
+
+#, fuzzy
+#~ msgid "Item preview size (characters)"
+#~ msgstr "اندازهٔ پیش‌نمایش (نویسه)"
+
+#, fuzzy
+#~ msgid "Previous page"
+#~ msgstr "ورودی قبلی"
+
+#, fuzzy
+#~ msgid "Next page"
+#~ msgstr "ورودی بعدی"
+
+#~ msgid "Settings"
+#~ msgstr "تنظیمات"
+
+#~ msgid "Text will be here"
+#~ msgstr "متن اینجا خواهد بود"
+
+#~ msgid "History Size"
+#~ msgstr "اندازهٔ تاریخچه"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "فاصلهٔ تازه‌سازی (میلی‌ثانیه)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "حداکثر اندازهٔ پروندهٔ انباره (کیلوبایت)"
+
+#~ msgid "Cache only favorites"
+#~ msgstr "فقط انبارش مورد علاقه‌ها"
+
+#~ msgid "Move item to the top after selection"
+#~ msgstr "جابه‌جایی مورد به بالا پس از گزینش"

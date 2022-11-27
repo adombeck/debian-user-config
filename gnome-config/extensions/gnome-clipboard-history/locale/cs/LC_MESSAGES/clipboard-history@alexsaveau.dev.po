@@ -1,0 +1,190 @@
+# Czech translation for gnome-shell-extension-clipboard-indicator.
+# Copyright (C) 2014-2017, Yotam Bar-On
+# This file is distributed under the same license as the gnome-shell-extension-clipboard-indicator package.
+# Daniel Rusek <mail@asciiwolf.com>, 2017.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-03-21 21:45+0100\n"
+"PO-Revision-Date: 2022-03-21 21:22+0100\n"
+"Last-Translator: Radek Šťastný <dedkus@gmail.com>\n"
+"Language-Team: \n"
+"Language: cs\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: extension.js:121
+#, fuzzy
+msgid "Search clipboard history…"
+msgstr "Maximální velikost historie (MiB)"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "Stop (proti úniku citlivých údajů)"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr "Vyčistit vše?"
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr "Opravdu chcete smazat všechny položky schránky?"
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr "Tato operace nejde vrátit."
+
+#: extension.js:532
+msgid "Clear"
+msgstr "Vyčistit"
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr "Storno"
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "Zkopírováno do schránky"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr "Zkopírováno"
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "Přepnout nabídku"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "Vyčistit historii"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "Předchozí položka"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "Následující položka"
+
+#: prefs.js:120
+msgid "Toggle private mode"
+msgstr "Přepnout soukromý režim"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr "Maximální počet položek"
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr "Šířka okna (%)"
+
+#: prefs.js:139
+msgid "Max clipboard history size (MiB)"
+msgstr "Maximální velikost historie (MiB)"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr "Na disk uložit jen oblíbené"
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "Při zkopírování zobrazit oznámení"
+
+#: prefs.js:154
+#, fuzzy
+msgid "Ask for confirmation before clearing history"
+msgstr "Zobrazit potvrzení při mazání historie"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr "Naposledy zkopírovanou položku přesunout na začátek seznamu"
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "Klávesové zkratky"
+
+#: prefs.js:169
+#, fuzzy
+msgid "Number of characters in status bar"
+msgstr "Počet znaků v horní liště"
+
+#: prefs.js:174
+#, fuzzy
+msgid "What to show in status bar"
+msgstr "Co zobrazovat v horní liště"
+
+#: prefs.js:179
+#, fuzzy
+msgid "Remove down arrow in status bar"
+msgstr "Nezobrazovat šipku dolů v horní liště"
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr "Odebrat prázdné znaky kolem textu"
+
+#: prefs.js:189
+msgid "Paste on selection"
+msgstr "Vkládat při výběru"
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr ""
+
+#: prefs.js:326
+msgid "Icon"
+msgstr "Ikonu"
+
+#: prefs.js:327
+#, fuzzy
+msgid "Clipboard contents"
+msgstr "Obsah schránky"
+
+#: prefs.js:328
+msgid "Both"
+msgstr "Obojí"
+
+#: prefs.js:329
+msgid "Neither"
+msgstr "Ani jedno"
+
+#~ msgid "Type here to search…"
+#~ msgstr "Vyhledávejte psaním…"
+
+#, fuzzy
+#~ msgid "Item preview size (characters)"
+#~ msgstr "Velikost náhledu (znaky)"
+
+#, fuzzy
+#~ msgid "Previous page"
+#~ msgstr "Předchozí položka"
+
+#, fuzzy
+#~ msgid "Next page"
+#~ msgstr "Následující položka"
+
+#~ msgid "Settings"
+#~ msgstr "Nastavení"
+
+#~ msgid "Text will be here"
+#~ msgstr "Zde bude text"
+
+#~ msgid "History Size"
+#~ msgstr "Hloubka historie"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "Interval obnovování (ms)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "Omezit velikost mezipaměti na nejvýše (KB)"
+
+#~ msgid "Cache only favorites"
+#~ msgstr "Ukládat do mezipaměti pouze oblíbené"
+
+#~ msgid "Move item to the top after selection"
+#~ msgstr "Poté, co byla vybrána, posunout položku na začátek seznamu"
+
+#~ msgid "Disable cache file"
+#~ msgstr "Nepoužívat mezipaměť (soubor)"

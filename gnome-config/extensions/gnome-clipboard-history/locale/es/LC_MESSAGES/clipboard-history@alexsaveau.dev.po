@@ -1,0 +1,184 @@
+# Spanish translation for gnome-shell-extension-clipboard-indicator.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-shell-extension-clipboard-indicator package.
+# Javier Junquera <javier.junquera.sanchez@gmail.com>, 2016.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-shell-extension-clipboard-indicator\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-02-23 12:15-0800\n"
+"PO-Revision-Date: 2022-04-12 15:21-0500\n"
+"Last-Translator: Ulices <hasecilu@protonmail.com>\n"
+"Language-Team: \n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0.1\n"
+
+#: extension.js:121
+msgid "Search clipboard history…"
+msgstr "Buscar en el historial del portapapeles…"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "Modo privado"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr "¿Limpiar todo?"
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr "¿Estás seguro de querer borrar todos los elementos del portapapeles?"
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr "Esta opción no se puede deshacer."
+
+#: extension.js:532
+msgid "Clear"
+msgstr "Limpiar"
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr "Cancelar"
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "Copiado al portapapeles"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr "Copiado"
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "Alternar menú"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "Limpiar historial"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "Entrada anterior"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "Entrada siguiente"
+
+#: prefs.js:120
+msgid "Toggle private mode"
+msgstr "Alternar modo privado"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr "Número máximo de elementos"
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr "Ancho de ventana (%)"
+
+#: prefs.js:139
+msgid "Max clipboard history size (MiB)"
+msgstr "Tamaño máximo del historial del portapapeles (MiB)"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr "Solo guardar favoritos al disco"
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "Mostrar una notificación al copiar"
+
+#: prefs.js:154
+msgid "Ask for confirmation before clearing history"
+msgstr "Solicitar confirmación antes de borrar el historial"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr "Mover los elementos copiados anteriormente a la parte superior"
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "Atajos de teclado"
+
+#: prefs.js:169
+msgid "Number of characters in status bar"
+msgstr "Número de caracteres en la barra de estado"
+
+#: prefs.js:174
+msgid "What to show in status bar"
+msgstr "Qué mostrar en la barra de estado"
+
+#: prefs.js:179
+msgid "Remove down arrow in status bar"
+msgstr "Número de caracteres en la barra de estado"
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr "Eliminar espacios en blanco alrededor del texto"
+
+#: prefs.js:189
+msgid "Paste on selection"
+msgstr "Pegar en la selección"
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr "Guardar la selección en el historial"
+
+#: prefs.js:326
+msgid "Icon"
+msgstr "Icono"
+
+#: prefs.js:327
+msgid "Clipboard contents"
+msgstr "Contenido del portapapeles"
+
+#: prefs.js:328
+msgid "Both"
+msgstr "Ambos"
+
+#: prefs.js:329
+msgid "Neither"
+msgstr "Ninguno"
+
+#~ msgid "Process primary selection"
+#~ msgstr "Proceso de selección primaria"
+
+#, fuzzy
+#~ msgid "Type here to search…"
+#~ msgstr "Escriba aquí para buscar…"
+
+#, fuzzy
+#~ msgid "Item preview size (characters)"
+#~ msgstr "Tamaño de previsualización (caracteres)"
+
+#, fuzzy
+#~ msgid "Previous page"
+#~ msgstr "Entrada anterior"
+
+#, fuzzy
+#~ msgid "Next page"
+#~ msgstr "Entrada siguiente"
+
+#~ msgid "Settings"
+#~ msgstr "Configuración"
+
+#~ msgid "Text will be here"
+#~ msgstr "El texto aparecerá aquí"
+
+#~ msgid "History Size"
+#~ msgstr "Tamaño del historial"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "Intervalo de actualización (ms)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "Tamaño máximo de antememoria (kB)"
+
+#~ msgid "Disable cache file"
+#~ msgstr "Desactivar archivo de antememoria"

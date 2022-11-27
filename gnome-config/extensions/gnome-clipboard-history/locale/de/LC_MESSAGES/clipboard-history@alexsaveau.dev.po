@@ -1,0 +1,182 @@
+# German translation for gnome-shell-extension-clipboard-indicator.
+# Copyright (C) 2014-2015, Yotam Bar-On
+# This file is distributed under the same license as the gnome-shell-extension-clipboard-indicator package.
+# Jens Lody <openweather@jenslody.de>, 2015.
+# Onno Giesmann <nutzer3105@gmail.com, 2019-2022.
+# Philipp Kiemle <philipp.kiemle@gmail.com>, 2022.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-02-23 12:15-0800\n"
+"PO-Revision-Date: 2022-04-13 10:07+0200\n"
+"Last-Translator: Onno Giesmann <nutzer3105@gmail.com>\n"
+"Language-Team: \n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0.1\n"
+
+#: extension.js:121
+msgid "Search clipboard history…"
+msgstr "Chronik der Zwischenablage durchsuchen …"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "Privater Modus"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr "Alles löschen?"
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr "Sollen wirklich alle Elemente in der Zwischenablage gelöscht werden?"
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr "Dieser Vorgang kann nicht rückgängig gemacht werden."
+
+#: extension.js:532
+msgid "Clear"
+msgstr "Löschen"
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "In Zwischenablage kopiert"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr "Kopiert"
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "Das Menü öffnen/schließen"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "Chronik löschen"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "Vorheriger Eintrag"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "Nächster Eintrag"
+
+#: prefs.js:120
+msgid "Toggle private mode"
+msgstr "Privaten Modus umschalten"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr "Maximale Anzahl an Einträgen"
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr "Fensterbreite (%)"
+
+#: prefs.js:139
+msgid "Max clipboard history size (MiB)"
+msgstr "Maximale Größe der Zwischenablagechronik (MiB)"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr "Nur die Favoriten auf der Festplatte speichern"
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "Benachrichtigung beim Kopieren anzeigen"
+
+#: prefs.js:154
+msgid "Ask for confirmation before clearing history"
+msgstr "Vor dem Löschen der Chronik nachfragen"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr "Zuletzt kopierte Einträge nach oben verschieben"
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "Tastaturkürzel"
+
+#: prefs.js:169
+msgid "Number of characters in status bar"
+msgstr "Anzahl der Zeichen in der Statusleiste"
+
+#: prefs.js:174
+msgid "What to show in status bar"
+msgstr "Folgendes in der Statusleiste anzeigen"
+
+#: prefs.js:179
+msgid "Remove down arrow in status bar"
+msgstr "Keinen Pfeil in der Statusleiste anzeigen"
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr "Leerzeichen vor und nach dem Text entfernen"
+
+#: prefs.js:189
+msgid "Paste on selection"
+msgstr "Bei Auswahl einfügen"
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr "Markierten Text in die Zwischenablagechronik aufnehmen"
+
+#: prefs.js:326
+msgid "Icon"
+msgstr "Symbol"
+
+#: prefs.js:327
+msgid "Clipboard contents"
+msgstr "Inhalt der Zwischenablage"
+
+#: prefs.js:328
+msgid "Both"
+msgstr "Beides"
+
+#: prefs.js:329
+msgid "Neither"
+msgstr "Nichts"
+
+#~ msgid "Process primary selection"
+#~ msgstr "Primäre Auswahl bearbeiten"
+
+#~ msgid "Item preview size (characters)"
+#~ msgstr "Anzahl der Zeichen in der Vorschau"
+
+#~ msgid "Previous page"
+#~ msgstr "Vorherige Seite"
+
+#~ msgid "Next page"
+#~ msgstr "Nächste Seite"
+
+#~ msgid "Settings"
+#~ msgstr "Einstellungen"
+
+#~ msgid "Text will be here"
+#~ msgstr "Hier erscheint der Text"
+
+#~ msgid "History Size"
+#~ msgstr "Größe des Verlaufs"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "Aktualisierungsintervall (ms)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "Maximale Größe der Pufferdatei (kb)"
+
+#~ msgid "Cache only favorites"
+#~ msgstr "Nur Favoriten zwischenspeichern"
+
+#~ msgid "Move item to the top after selection"
+#~ msgstr "Eintrag nach Auswahl nach oben verschieben"
