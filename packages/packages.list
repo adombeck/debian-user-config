@@ -1,24 +1,36 @@
 apt-file
 bat
+dconf-editor
 debianutils
 devscripts
 fd-find
+file-roller
 firefox
 flatpak
 fzf
+gedit
+git-revise
 glances
-gnome
+gnome-core
 gnome-shell-extension-appindicator
 gnome-shell-extension-caffeine
+gnome-tweaks
 guake
+htop
+ncdu
 ripgrep
 silversearcher-ag
 thefuck
 tor
 torbrowser-launcher
 vim
+vlc
 wget
+zip
 zsh
+
+# Recommended packages I don't want to install
+ibus-
 
 # For the zsh agnoster theme
 fonts-powerline
