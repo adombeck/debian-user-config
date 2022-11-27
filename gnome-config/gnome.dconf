@@ -1,5 +1,5 @@
 [shell]
-enabled-extensions=['places-menu@gnome-shell-extensions.gcampax.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'window-list@gnome-shell-extensions.gcampax.github.com', 'appindicatorsupport@rgcjonas.gmail.com']
+enabled-extensions=['places-menu@gnome-shell-extensions.gcampax.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'window-list@gnome-shell-extensions.gcampax.github.com', 'appindicatorsupport@rgcjonas.gmail.com', 'clipboard-history@alexsaveau.dev']
 
 [desktop/input-sources]
 xkb-options=['caps:none']
@@ -26,4 +26,8 @@ overrides={'Gtk/ShellShowsAppMenu': <1>}
 [settings-daemon/plugins/color]
 night-light-enabled=true
 
+[shell/extensions/clipboard-history]
+clear-history=['<Ctrl>F10']
+next-entry=['<Ctrl>F12']
+prev-entry=['<Ctrl>F11']
 
