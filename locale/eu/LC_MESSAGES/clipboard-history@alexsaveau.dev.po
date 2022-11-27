@@ -1,0 +1,194 @@
+# Basque translation for gnome-shell-extension-clipboard-indicator.
+# This file is distributed under the same license as the Dash to Dock package.
+# Ibai Oihanguren Sala <ibai@oihanguren.com>, 2020.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-shell-extension-clipboard-indicator\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-02-23 12:15-0800\n"
+"PO-Revision-Date: 2020-10-05 23:34+0200\n"
+"Last-Translator: Ibai Oihanguren Sala <ibai@oihanguren.com>\n"
+"Language-Team: \n"
+"Language: eu\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: extension.js:121
+#, fuzzy
+msgid "Search clipboard history…"
+msgstr "Arbelaren historia garbituta"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "Modu pribatua"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr "Guztia garbitu?"
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr "Ziur arbeleko elementu guztiak kendu nahi dituzula?"
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr "Ezin da eragiketa hau desegin."
+
+#: extension.js:532
+msgid "Clear"
+msgstr "Garbitu"
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr "Utzi"
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "Arbelera kopiatuta"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr ""
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "Erakutsi/ezkutatu menua"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "Garbitu historia"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "Aurreko sarrera"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "Hurrengo sarrera"
+
+#: prefs.js:120
+#, fuzzy
+msgid "Toggle private mode"
+msgstr "Modu pribatua"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr ""
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr ""
+
+#: prefs.js:139
+#, fuzzy
+msgid "Max clipboard history size (MiB)"
+msgstr "Arbelaren historia garbituta"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr ""
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "Erakutsi jakinarazpena kopiatzean"
+
+#: prefs.js:154
+#, fuzzy
+msgid "Ask for confirmation before clearing history"
+msgstr "Erakutsi jakinarazpena kopiatzean"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr ""
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "Laster-teklak"
+
+#: prefs.js:169
+#, fuzzy
+msgid "Number of characters in status bar"
+msgstr "Goiko barrako karaktere kopurua"
+
+#: prefs.js:174
+#, fuzzy
+msgid "What to show in status bar"
+msgstr "Zer erakutsi goiko barran"
+
+#: prefs.js:179
+#, fuzzy
+msgid "Remove down arrow in status bar"
+msgstr "Kendu beheranzko gezia goiko barran"
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr "Kendu testuaren inguruko hutsuneak"
+
+#: prefs.js:189
+#, fuzzy
+msgid "Paste on selection"
+msgstr "Gaitu ezabaketa"
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr ""
+
+#: prefs.js:326
+msgid "Icon"
+msgstr "Ikonoa"
+
+#: prefs.js:327
+#, fuzzy
+msgid "Clipboard contents"
+msgstr "Arbelaren edukia"
+
+#: prefs.js:328
+msgid "Both"
+msgstr "Biak"
+
+#: prefs.js:329
+msgid "Neither"
+msgstr ""
+
+#, fuzzy
+#~ msgid "Process primary selection"
+#~ msgstr "Gaitu ezabaketa"
+
+#, fuzzy
+#~ msgid "Type here to search…"
+#~ msgstr "Idatzi hemen bilatzeko..."
+
+#, fuzzy
+#~ msgid "Item preview size (characters)"
+#~ msgstr "Aurrebistaren tamaina (karaktereak)"
+
+#, fuzzy
+#~ msgid "Previous page"
+#~ msgstr "Aurreko sarrera"
+
+#, fuzzy
+#~ msgid "Next page"
+#~ msgstr "Hurrengo sarrera"
+
+#~ msgid "Settings"
+#~ msgstr "Ezarpenak"
+
+#~ msgid "Text will be here"
+#~ msgstr "Testua hemen azalduko da"
+
+#~ msgid "History Size"
+#~ msgstr "Historiaren tamaina"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "Berritze-maiztasuna (ms)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "Cache fitxategiaren gehienezko tamaina (kb)"
+
+#~ msgid "Cache only favorites"
+#~ msgstr "Cacheratu gogokoak soilik"
+
+#~ msgid "Move item to the top after selection"
+#~ msgstr "Eraman elementua goraino hautatu ostean"

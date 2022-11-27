@@ -1,0 +1,175 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-02-23 12:15-0800\n"
+"PO-Revision-Date: 2017-05-04 17:27+0300\n"
+"Last-Translator: Raphael Rochet <raphael@rri.fr>\n"
+"Language-Team: \n"
+"Language: el\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 2.0.1\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: extension.js:121
+#, fuzzy
+msgid "Search clipboard history…"
+msgstr "Κενό ιστορικό"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "Ιδιωτική λειτουργία"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr ""
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr ""
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr ""
+
+#: extension.js:532
+msgid "Clear"
+msgstr ""
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr ""
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "Αντεγραμμένο στο πρόχειρο"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr ""
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "Εμφάνιση/Απόκρυψη μενού"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "Εκκάθαρση ιστορικού"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "Προηγούμενη καταχώρηση"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "Επόμενη καταχώρηση"
+
+#: prefs.js:120
+#, fuzzy
+msgid "Toggle private mode"
+msgstr "Ιδιωτική λειτουργία"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr ""
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr ""
+
+#: prefs.js:139
+#, fuzzy
+msgid "Max clipboard history size (MiB)"
+msgstr "Κενό ιστορικό"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr ""
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "Εμφάνιση ειδοποίησης με την αντιγραφή"
+
+#: prefs.js:154
+#, fuzzy
+msgid "Ask for confirmation before clearing history"
+msgstr "Εμφάνιση ειδοποίησης με την αντιγραφή"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr ""
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "Συντομεύσεις πληκτρολογίου"
+
+#: prefs.js:169
+msgid "Number of characters in status bar"
+msgstr ""
+
+#: prefs.js:174
+msgid "What to show in status bar"
+msgstr ""
+
+#: prefs.js:179
+msgid "Remove down arrow in status bar"
+msgstr ""
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr ""
+
+#: prefs.js:189
+msgid "Paste on selection"
+msgstr ""
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr ""
+
+#: prefs.js:326
+msgid "Icon"
+msgstr ""
+
+#: prefs.js:327
+msgid "Clipboard contents"
+msgstr ""
+
+#: prefs.js:328
+msgid "Both"
+msgstr ""
+
+#: prefs.js:329
+msgid "Neither"
+msgstr ""
+
+#, fuzzy
+#~ msgid "Item preview size (characters)"
+#~ msgstr "Μέγεθος προεπισκόπησης (χαρακτήρες)"
+
+#, fuzzy
+#~ msgid "Previous page"
+#~ msgstr "Προηγούμενη καταχώρηση"
+
+#, fuzzy
+#~ msgid "Next page"
+#~ msgstr "Επόμενη καταχώρηση"
+
+#~ msgid "Settings"
+#~ msgstr "Ρυθμίσεις"
+
+#~ msgid "History Size"
+#~ msgstr "Μέγεθος ιστορικού"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "Διάστημα επαναφόρτωσης (ms)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "Μέγιστο μέγεθος αρχείων κρυφής μνήμης (kb)"

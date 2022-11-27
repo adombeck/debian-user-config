@@ -1,0 +1,191 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2022-02-23 12:15-0800\n"
+"PO-Revision-Date: 2021-11-20 14:03+0100\n"
+"Last-Translator: Quentin PAGÈS\n"
+"Language-Team: \n"
+"Language: oc\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.0\n"
+
+#: extension.js:121
+#, fuzzy
+msgid "Search clipboard history…"
+msgstr "Istoric del quichapapièrs escafat"
+
+#: extension.js:208
+msgid "Private mode"
+msgstr "Mòde privat"
+
+#: extension.js:524
+msgid "Clear all?"
+msgstr "Tot escafar ?"
+
+#: extension.js:525
+msgid "Are you sure you want to delete all clipboard items?"
+msgstr "Volètz vertadièrament suprimir totes los elements del quichapapièr ?"
+
+#: extension.js:526
+msgid "This operation cannot be undone."
+msgstr "Aquò pòt pas èsser anullat."
+
+#: extension.js:532
+msgid "Clear"
+msgstr "Escafar"
+
+#: extension.js:533 extension.js:887
+msgid "Cancel"
+msgstr "Anullar"
+
+#: extension.js:886
+msgid "Copied to clipboard"
+msgstr "Copiat dins lo quichapapièrs"
+
+#: extension.js:1221
+msgid "Copied"
+msgstr ""
+
+#: prefs.js:96
+msgid "Toggle the menu"
+msgstr "Alternar menú"
+
+#: prefs.js:102
+msgid "Clear history"
+msgstr "Escafar l’istoric"
+
+#: prefs.js:108
+msgid "Previous entry"
+msgstr "Entrada precedenta"
+
+#: prefs.js:114
+msgid "Next entry"
+msgstr "Entrada seguenta"
+
+#: prefs.js:120
+#, fuzzy
+msgid "Toggle private mode"
+msgstr "Mòde privat"
+
+#: prefs.js:129
+msgid "Max number of items"
+msgstr ""
+
+#: prefs.js:134
+msgid "Window width (%)"
+msgstr ""
+
+#: prefs.js:139
+#, fuzzy
+msgid "Max clipboard history size (MiB)"
+msgstr "Istoric del quichapapièrs escafat"
+
+#: prefs.js:144
+msgid "Only save favorites to disk"
+msgstr ""
+
+#: prefs.js:149
+msgid "Show notification on copy"
+msgstr "Afichar una notificacion en copiant"
+
+#: prefs.js:154
+#, fuzzy
+msgid "Ask for confirmation before clearing history"
+msgstr "Afichar una notificacion en copiant"
+
+#: prefs.js:159
+msgid "Move previously copied items to the top"
+msgstr ""
+
+#: prefs.js:164
+msgid "Keyboard shortcuts"
+msgstr "Acorchis de clavièr"
+
+#: prefs.js:169
+#, fuzzy
+msgid "Number of characters in status bar"
+msgstr "Nombre de caractèrs a la barra d’ennaut"
+
+#: prefs.js:174
+#, fuzzy
+msgid "What to show in status bar"
+msgstr "Qué veire a la barra d’ennaut"
+
+#: prefs.js:179
+#, fuzzy
+msgid "Remove down arrow in status bar"
+msgstr "Suprimir la sageta bassa de la barra d’ennaut"
+
+#: prefs.js:184
+msgid "Remove whitespace around text"
+msgstr "Suprimir los espacis blancs a l’entorn del tèxt"
+
+#: prefs.js:189
+msgid "Paste on selection"
+msgstr ""
+
+#: prefs.js:194
+msgid "Save selected text to history"
+msgstr ""
+
+#: prefs.js:326
+msgid "Icon"
+msgstr "Icòna"
+
+#: prefs.js:327
+#, fuzzy
+msgid "Clipboard contents"
+msgstr "Contengut del quichapapièrs"
+
+#: prefs.js:328
+msgid "Both"
+msgstr "Los dos"
+
+#: prefs.js:329
+msgid "Neither"
+msgstr ""
+
+#, fuzzy
+#~ msgid "Type here to search…"
+#~ msgstr "Picatz aquí per recercar..."
+
+#, fuzzy
+#~ msgid "Item preview size (characters)"
+#~ msgstr "Talha de la previsualizacion (caractèrs)"
+
+#, fuzzy
+#~ msgid "Previous page"
+#~ msgstr "Entrada precedenta"
+
+#, fuzzy
+#~ msgid "Next page"
+#~ msgstr "Entrada seguenta"
+
+#~ msgid "Settings"
+#~ msgstr "Preferéncias"
+
+#~ msgid "Text will be here"
+#~ msgstr "Lo tèxt serà aicí"
+
+#~ msgid "History Size"
+#~ msgstr "Talha de l'istoric"
+
+#~ msgid "Refresh Interval (ms)"
+#~ msgstr "Interval de refresquiment (ms)"
+
+#~ msgid "Max cache file size (kb)"
+#~ msgstr "Talha maximala del fichièr de cache (ko)"
+
+#~ msgid "Cache only favorites"
+#~ msgstr "Metre sonque los favorits en cache"
+
+#~ msgid "Move item to the top after selection"
+#~ msgstr "Desplaçar l’element ennaut aprèp seleccion"
