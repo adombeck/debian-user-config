@@ -2,9 +2,6 @@
 
 APP="com.spotify.Client"
 
-# First, remove all existing --user settings for the app
-flatpak override --user --reset "$APP"
-
-# Don't allow access to $HOME
-flatpak override --user --nofilesystem=home "$APP"
+# Allow read-only access to Picures and Music
+flatpak override --user --filesystem=xdg-pictures:ro --filesystem=xdg-music:ro "$APP"
 
