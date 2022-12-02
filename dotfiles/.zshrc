@@ -6,6 +6,9 @@ export LANG=en_US.UTF-8
 # Required to set PATHs for snap
 emulate sh -c 'source /etc/profile'
 
+# Add user specific PATHs
+emulate sh -c 'source ~/.profile'
+
 ZSH_THEME="agnoster"
 
 plugins=(bgnotify)
@@ -24,8 +27,6 @@ fpath=($HOME/.zsh/lib/completions $fpath)
 # Load and run compinit
 autoload -U compinit
 compinit -i
-
-PATH=/usr/local/bin:/usr/local/sbin:$HOME/bin:$PATH
 
 # Go Path related exports
 export GOPATH=~/go
