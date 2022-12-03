@@ -1,3 +1,5 @@
+#!/bin/sh
+
 screenlock-watcher.sh &
 
 if zenity --question --text "Run startup applications?"; then

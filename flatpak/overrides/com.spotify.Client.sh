@@ -1,5 +1,8 @@
 #!/bin/bash
 
+set -eu
+set -x
+
 APP="com.spotify.Client"
 
 # Reset previously applied app overrides

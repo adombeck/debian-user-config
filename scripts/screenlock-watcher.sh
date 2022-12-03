@@ -1,3 +1,7 @@
+#!/bin/bash
+
+set -euo pipefail
+
 exit_report(){
 	echo "$(date) Monitoring Terminated."
 }

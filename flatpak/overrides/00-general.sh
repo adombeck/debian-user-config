@@ -1,5 +1,8 @@
 #!/bin/bash
 
+set -eu
+set -x
+
 # Reset previously applied global overrides
 sudo flatpak override --reset
 

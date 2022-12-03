@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Based on https://github.com/pygobject/pygobject-stubs/issues/5#issuecomment-639541725
 
 GI_REPO_PATH="${1:-/usr/lib/x86_64-linux-gnu/girepository-1.0/}"
