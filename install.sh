@@ -8,6 +8,9 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 "$DIR/packages/install-sources.sh"
 "$DIR/packages/install-packages.sh"
 
+# Install persistent iptables config
+"$DIR/iptables/install.sh"
+
 # Install my scripts
 "$DIR/scripts/install.sh"
 
