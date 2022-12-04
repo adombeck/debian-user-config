@@ -1,5 +1,6 @@
 apt-file
 bat
+curl
 dconf-editor
 debianutils
 devscripts
