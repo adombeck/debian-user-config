@@ -18,5 +18,10 @@ sudo flatpak override --nosocket=x11 --nosocket=fallback-x11 --nosocket=pulseaud
 # Disallow access to the hosts IPC namespace
 sudo flatpak override --unshare=ipc
 
+# Disallow access to features
+sudo flatpak override --disallow=devel
+sudo flatpak override --disallow=bluetooth
+sudo flatpak override --disallow=canbus
+
 # Allow read-only access to the ~/flatpak-shared-ro directory
 sudo flatpak override --filesystem=~/flatpak-shared-ro:ro
