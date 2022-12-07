@@ -1,0 +1,9 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhistcnt =7
+let g:netrw_dirhist_7='/home/user/projects/debian-config'
+let g:netrw_dirhist_6='/home/user/tmp/TailsData_unlocked/custom-features'
+let g:netrw_dirhist_5='/media/private/finanzen/steuer/2020/Betriebsausgaben'
+let g:netrw_dirhist_4='/home/user/projects/tails/.git'
+let g:netrw_dirhist_3='/home/user/.gnupg'
+let g:netrw_dirhist_2='/home/user/projects/tails/.git/modules/submodules/tails-workarounds'
+let g:netrw_dirhist_1='/home/user/git/nixpkgs/nixos/modules/installer/cd-dvd'

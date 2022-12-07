@@ -1,9 +1,0 @@
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=disable-usb-wakeup.sh
-ExecStop=disable-usb-wakeup.sh --enable
-
-[Install]
-WantedBy=multi-user.target
-

@@ -1,6 +1,0 @@
-# To fetch packages via Tor:
-#deb tor+http://2s4yqjx5ul6okpp3f2gaunr2syex5jgbfpfvhxxbbjwnrsvbk5v3qbid.onion/debian sid main contrib non-free
-#deb-src tor+http://2s4yqjx5ul6okpp3f2gaunr2syex5jgbfpfvhxxbbjwnrsvbk5v3qbid.onion/debian sid main contrib non-free
-
-deb http://ftp.de.debian.org/debian/ sid main contrib non-free
-deb-src http://ftp.de.debian.org/debian/ sid main contrib
