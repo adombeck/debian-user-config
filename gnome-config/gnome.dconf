@@ -26,6 +26,12 @@ overrides={'Gtk/ShellShowsAppMenu': <1>}
 [settings-daemon/plugins/color]
 night-light-enabled=true
 
+[settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/']
+next=['<Control><Alt>Right']
+play=['<Control><Alt>Down']
+previous=['<Control><Alt>Left']
+
 [shell/extensions/clipboard-history]
 clear-history=['<Ctrl>F10']
 next-entry=['<Ctrl>F12']
