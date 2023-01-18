@@ -12,3 +12,5 @@
     old = 9
 [init]
 	defaultBranch = main
+[pull]
+	rebase = true
