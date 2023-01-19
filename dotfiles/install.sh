@@ -52,7 +52,13 @@ maybe_create_symlink() {
 }
 
 for f in "$DIR"/.[!.]*; do
-  maybe_create_symlink "$f"
+  if [ "${f#"${DIR}/"}" = ".config" ]; then
+    for c in .config/*; do
+      maybe_create_symlink "$c"
+    done
+  else
+    maybe_create_symlink "$f"
+  fi
 done
 
 # Set zsh as the default shell
