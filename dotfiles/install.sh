@@ -53,7 +53,7 @@ maybe_create_symlink() {
 
 for f in "$DIR"/.[!.]*; do
   if [ "${f#"${DIR}/"}" = ".config" ]; then
-    for c in .config/*; do
+    for c in "${DIR}"/.config/*; do
       maybe_create_symlink "$c"
     done
   else
