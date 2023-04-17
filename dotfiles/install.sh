@@ -54,7 +54,7 @@ maybe_create_symlink() {
 
 for f in "$DIR"/.[!.]*; do
   if [ "${f#"${DIR}/"}" = ".config" ]; then
-    for c in "${DIR}"/.config/*; do
+    find "${f}" -type f | while read c; do
       maybe_create_symlink "$c"
     done
   else
