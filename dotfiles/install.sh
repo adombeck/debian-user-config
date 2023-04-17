@@ -7,7 +7,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 maybe_create_symlink() {
   local source="${1}"
-  local target="$HOME/$(realpath --relative-to="$DIR" "${source}")"
+  local target
+  target="$HOME/$(realpath --relative-to="$DIR" "${source}")"
   echo "target: $target"
 
   if [[ "$f" == "$DIR/.gitmodules" ]] || [[ "${source}" == "$DIR/.nfs"* ]]; then
