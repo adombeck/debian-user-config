@@ -19,6 +19,10 @@ switch-windows-backward=['<Shift><Alt>Tab']
 
 [desktop/wm/preferences]
 button-layout='appmenu:minimize,maximize,close'
+num-workspaces=1
+
+[mutter]
+dynamic-workspaces=false
 
 [settings-daemon/plugins/xsettings]
 overrides={'Gtk/ShellShowsAppMenu': <1>}
