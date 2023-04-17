@@ -57,6 +57,10 @@ for f in "$DIR"/.[!.]*; do
     find "${f}" -type f | while read c; do
       maybe_create_symlink "$c"
     done
+  elif [ "${f#"${DIR}/"}" = ".var" ]; then
+    find "${f}" -type f | while read c; do
+      cp "$c" "$HOME/$(realpath --relative-to="$DIR" "${c}")"
+    done
   else
     maybe_create_symlink "$f"
   fi
