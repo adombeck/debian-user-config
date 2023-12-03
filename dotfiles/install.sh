@@ -49,6 +49,7 @@ maybe_create_symlink() {
   fi
 
   echo "Creating symlink for ${source}"
+  mkdir -p "$(dirname "${target}")"
   ln -s "${source}" "${target}"
 }
 
