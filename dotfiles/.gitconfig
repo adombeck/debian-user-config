@@ -9,7 +9,7 @@
 [submodule]
 	recurse = true
 [color "diff"]
-    old = 9
+	old = 9
 [init]
 	defaultBranch = main
 [pull]
