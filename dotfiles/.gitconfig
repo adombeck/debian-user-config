@@ -3,6 +3,7 @@
 	excludesfile = /home/user/.gitignore
 [branch]
 	autosetuprebase = always
+	sort = -committerdate
 [pager]
 	diff = true
 	branch = false
@@ -16,3 +17,9 @@
 	rebase = true
 [push]
 	autoSetupRemote = true
+[merge]
+	conflictStyle = zdiff3
+[commit]
+	verbose = true
+[stash]
+	showIncludeUntracked
