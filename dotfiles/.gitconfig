@@ -21,5 +21,7 @@
 	conflictStyle = zdiff3
 [commit]
 	verbose = true
+[rebase]
+    autoStash = true
 [stash]
 	showIncludeUntracked
