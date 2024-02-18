@@ -40,6 +40,10 @@ for f in "${DIR}"/*; do
     if [ "$(basename "$f")" == "$(basename "$0")" ]; then
         continue
     fi
+    if [ "$(basename "$f")" == "units-to-enable" ]; then
+        continue
+    fi
+
     target="${HOME}/.config/systemd/user/$(realpath --relative-to="${DIR}" "$f")"
     maybe_create_symlink "$f" "${target}"
 
@@ -48,3 +52,9 @@ for f in "${DIR}"/*; do
     esac
 done
 
+# Enable the units listed in the units-to-enable file
+if [ -f "${DIR}/units-to-enable" ]; then
+  while read -r unit; do
+    systemctl --user enable "${unit}"
+  done < "${DIR}/units-to-enable"
+fi
