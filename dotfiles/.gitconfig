@@ -3,6 +3,9 @@
 	# and colors
 	bb = !better-git-branch
 
+	# Safer push with force
+	pushf = push --force-with-lease --force-if-includes
+
 [core]
 	editor = vim
 	excludesfile = /home/user/.gitignore
