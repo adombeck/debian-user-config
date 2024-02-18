@@ -15,8 +15,8 @@
 	pager = delta --diff-so-fancy
 
 [help]
-  # Autocorrect typos in git commands after 1.5 seconds
-  autocorrect = 15
+	# Autocorrect typos in git commands
+	autocorrect = immediate
 
 [init]
 	# Use the main branch as the default branch
