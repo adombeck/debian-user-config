@@ -3,8 +3,7 @@
 set -e
 set -u
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 maybe_create_symlink() {
   local source="${1}"
@@ -37,24 +36,24 @@ maybe_create_symlink() {
 }
 
 for f in "${DIR}"/*; do
-    if [ "$(basename "$f")" == "$(basename "$0")" ]; then
-        continue
-    fi
-    if [ "$(basename "$f")" == "units-to-enable" ]; then
-        continue
-    fi
+  if [ "$(basename "$f")" == "$(basename "$0")" ]; then
+    continue
+  fi
+  if [ "$(basename "$f")" == "units-to-enable" ]; then
+    continue
+  fi
 
-    target="${HOME}/.config/systemd/user/$(realpath --relative-to="${DIR}" "$f")"
-    maybe_create_symlink "$f" "${target}"
+  target="${HOME}/.config/systemd/user/$(realpath --relative-to="${DIR}" "$f")"
+  maybe_create_symlink "$f" "${target}"
 
-    case  "$f" in 
-        *.service) systemctl --user enable "$f"
-    esac
+  case "$f" in
+  *.service) systemctl --user enable "$f" ;;
+  esac
 done
 
 # Enable the units listed in the units-to-enable file
 if [ -f "${DIR}/units-to-enable" ]; then
   while read -r unit; do
     systemctl --user enable "${unit}"
-  done < "${DIR}/units-to-enable"
+  done <"${DIR}/units-to-enable"
 fi
