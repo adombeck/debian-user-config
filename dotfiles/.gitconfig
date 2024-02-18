@@ -1,3 +1,8 @@
+[alias]
+	# My better-git-branch script lists branches with useful information
+	# and colors
+	bb = !better-git-branch
+
 [core]
 	editor = vim
 	excludesfile = /home/user/.gitignore
