@@ -87,9 +87,6 @@
 	# (shows diff of what is being commited <3)
 	verbose = true
 
-	# Don't remove #comments from the commit message
-	cleanup = scissors
-
 [rebase]
 	# Automatically create a temporary stash entry before the operation begins, and apply it after the
 	# operation ends.
