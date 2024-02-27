@@ -1,3 +1,7 @@
+[user]
+	name = Adrian Dombeck
+	email = adrian.dombeck@gmail.com
+
 [alias]
 	# My better-git-branch script lists branches with useful information
 	# and colors
