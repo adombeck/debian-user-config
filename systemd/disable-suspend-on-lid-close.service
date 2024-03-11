@@ -1,7 +1,0 @@
-[Service]
-Type=simple
-RemainAfterExit=yes
-ExecStart=/usr/libexec/gnome-tweak-tool-lid-inhibitor
-[Install]
-WantedBy=default.target
-
