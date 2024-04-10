@@ -116,3 +116,6 @@ let g:ackprg = 'ag --nogroup --nocolor --column'
 " Gitgutter
 let g:gitgutter_sign_column_always = 1
 set updatetime=250
+
+" Enable spell checking in git commit messages
+autocmd Filetype gitcommit setlocal spell
