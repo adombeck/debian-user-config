@@ -7,7 +7,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Install dotfiles
 "$DIR/dotfiles/install.sh"
 
-# Instal systemd services
+# Install systemd services
 "$DIR/systemd/install.sh"
 
 # Configure GNOME
