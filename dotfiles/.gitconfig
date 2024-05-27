@@ -6,6 +6,9 @@
 	# Safer push with force
 	pushf = push --force-with-lease --force-if-includes
 
+	# Push with force and without pre-push hooks
+	pushff = pushf --no-verify
+
 [core]
 	editor = vim
 	excludesfile = /home/user/.gitignore
