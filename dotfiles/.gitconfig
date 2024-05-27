@@ -125,6 +125,10 @@
 	# Highlight recent changes in the output of `git blame`
 	coloring = highlightRecent
 
+[log]
+	# Continue listing the history of a file beyond renames
+	follow = true
+
 [color "blame"]
 	highlightRecent = blue,6 month ago,green,1 month ago,brightGreen
 
