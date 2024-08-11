@@ -49,6 +49,7 @@ maybe_create_symlink() {
   fi
 
   echo "Creating symlink for ${source}"
+  mkdir -p "$(dirname "${target}")"
   ln -s "${source}" "${target}"
 }
 
@@ -59,7 +60,9 @@ for f in "$DIR"/.[!.]*; do
     done
   elif [ "${f#"${DIR}/"}" = ".var" ]; then
     find "${f}" -type f | while read c; do
-      cp "$c" "$HOME/$(realpath --relative-to="$DIR" "${c}")"
+      target="$HOME/$(realpath --relative-to="$DIR" "${c}")"
+      mkdir -p "$(dirname "${target}")"
+      cp "$c" "$target"
     done
   else
     maybe_create_symlink "$f"
