@@ -87,7 +87,11 @@ def main():
     # If the clipboard content is a path to an existing file (optionally
     # with a line number), open the file in IntelliJ
     if ':' in clipboard_content:
-        path, line_number = clipboard_content.split(':')
+        # We want to support both "path/to/file:line_number" and
+        # "path/to/file:line_number:" (the latter is shown by `git diff`),
+        # so we ignore everything after the second colon.
+        parts = clipboard_content.split(':')
+        path, line_number = parts[0], parts[1]
     else:
         path, line_number = clipboard_content, None
     path = Path(path)
