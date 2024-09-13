@@ -14,11 +14,13 @@ from gi.repository import Notify
 # so that they replace each other's notifications.
 NOTIFICATION_ID_FILE = Path(f"/run/user/{os.getuid()}/notification-id")
 
-INTELLIJ_COMMAND = ["idea.sh"]
+INTELLIJ_COMMAND = ["idea"]
 
 PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+), in .*')
 GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
 
+# Add $HOME/.local/bin to the PATH
+os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
 
 def notify(title, body):
     if NOTIFICATION_ID_FILE.exists():
