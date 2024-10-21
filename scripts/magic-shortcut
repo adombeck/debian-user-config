@@ -18,6 +18,7 @@ INTELLIJ_COMMAND = ["idea"]
 
 PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+), in .*')
 GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
+JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
 
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
@@ -67,6 +68,14 @@ def main():
     if not clipboard_content:
         # Show a notification if the clipboard is empty
         notify("Clipboard is empty", "Nothing to do")
+        return
+
+    # If the clipboard content is a Jira issue key, open the issue in the browser
+    match = JIRA_ISSUE_REGEX.match(clipboard_content)
+    if match:
+        issue_key = match.group(0)
+        print(f"Opening Jira issue {issue_key}", file=sys.stderr)
+        subprocess.run(["xdg-open", f"https://warthogs.atlassian.net/browse/{issue_key}"])
         return
 
     # If the clipboard content is a Python stack trace, open the files in IntelliJ
