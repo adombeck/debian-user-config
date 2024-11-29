@@ -31,13 +31,14 @@
 
 [interactive]
 	# Use delta to color the diff of interactive commands (e.g. `git add -p`)
-	diffFilter = delta --diff-so-fancy --color-only
+	diffFilter = delta --color-only
 
 [delta]
 	# Support navigating the diff output with n and N
 	navigate = true
 	# Display tabs with a width of 4
 	tabs = 4
+	diff-so-fancy = true
 
 [submodule]
 	# Enable --recurse-submodules by default
