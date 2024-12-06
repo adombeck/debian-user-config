@@ -14,14 +14,67 @@ from gi.repository import Notify
 # so that they replace each other's notifications.
 NOTIFICATION_ID_FILE = Path(f"/run/user/{os.getuid()}/notification-id")
 
-INTELLIJ_COMMAND = ["idea"]
-
 PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+), in .*')
 GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
 JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
 
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
+
+
+class Editor:
+    def open(self, path, line_number=None):
+        raise NotImplementedError
+
+
+class IntelliJ(Editor):
+    def open(self, path, line_number=None):
+        command = ["idea"]
+        real_path = Path(path)
+
+        if not real_path.exists():
+            notify("File not found", str(path))
+            return
+
+        if line_number:
+            command = command + ['--line', line_number, str(real_path)]
+        else:
+            command = command + [str(real_path)]
+        notify("Opening file in IntelliJ", str(real_path))
+        print(f"Command: {' '.join(command)}", file=sys.stderr)
+        subprocess.run(command)
+
+
+class VSCode(Editor):
+    def __init__(self):
+        self.command = ["code"]
+        self.name = "VS Code"
+
+    def open(self, path, line_number=None):
+        real_path = Path(path)
+
+        if not real_path.exists():
+            notify("File not found", str(path))
+            return
+
+        if line_number:
+            command = self.command + ['--goto', f"{real_path}:{line_number}"]
+        else:
+            command = self.command + [str(real_path)]
+        notify(f"Opening file in {self.name}", str(real_path))
+        print(f"Command: {' '.join(command)}", file=sys.stderr)
+        subprocess.run(command)
+
+
+class Cursor(VSCode):
+    def __init__(self):
+        super().__init__()
+        self.command = ["cursor"]
+        self.name = "Cursor"
+
+
+EDITOR = Cursor()
+
 
 def notify(title, body):
     if NOTIFICATION_ID_FILE.exists():
@@ -37,22 +90,6 @@ def notify(title, body):
     notification.show()
 
     Path(NOTIFICATION_ID_FILE).write_text(str(notification.props.id))
-
-
-def open_in_intellij(path, line_number=None):
-    real_path = Path(path)
-
-    if not real_path.exists():
-        notify("File not found", str(path))
-        return
-
-    if line_number:
-        command = INTELLIJ_COMMAND + ['--line', line_number, str(real_path)]
-    else:
-        command = INTELLIJ_COMMAND + [str(real_path)]
-    notify("Opening file in IntelliJ", str(real_path))
-    print(f"Command: {' '.join(command)}", file=sys.stderr)
-    subprocess.run(command)
 
 
 def main():
@@ -95,7 +132,7 @@ def main():
         path = match.group(1)
         line_number = match.group(2)
         print(f"Opening Python stacktrace {path}", file=sys.stderr)
-        open_in_intellij(path, line_number)
+        EDITOR.open(path, line_number)
         return
 
     # If the clipboard content is a git diff, open the files in IntelliJ
@@ -103,7 +140,7 @@ def main():
     if match:
         path = match.group(1)
         print(f"Opening git diff {path}", file=sys.stderr)
-        open_in_intellij(path)
+        EDITOR.open(path)
         return
 
     # If the clipboard content is a path to an existing file (optionally
@@ -119,7 +156,7 @@ def main():
     path = Path(path)
     if path.exists():
         print(f"Trying {path}", file=sys.stderr)
-        open_in_intellij(path, line_number)
+        EDITOR.open(path, line_number)
         return
 
     # If the clipboard content is a relative path below the authd
@@ -131,16 +168,15 @@ def main():
             absolute_path = project_path / path
             if absolute_path.exists():
                 print(f"Trying {absolute_path}", file=sys.stderr)
-                open_in_intellij(absolute_path, line_number)
+                EDITOR.open(absolute_path, line_number)
                 return
             # If the path starts with the project directory, remove that part
             if path.parts[0] == project:
                 absolute_path = project_path / Path(*path.parts[1:])
                 if absolute_path.exists():
                     print(f"Trying {absolute_path}", file=sys.stderr)
-                    open_in_intellij(absolute_path, line_number)
+                    EDITOR.open(absolute_path, line_number)
                     return
-
 
     # Show a notification
     notify("Clipboard content not recognized", clipboard_content)
