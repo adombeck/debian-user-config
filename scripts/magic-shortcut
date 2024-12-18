@@ -87,7 +87,15 @@ def notify(title, body):
         body=body,
         id=id_,
     )
-    notification.show()
+    try:
+        notification.show()
+    except gi.repository.GLib.Error as e:
+        if "Invalid notification ID" in str(e):
+            # Delete the notification file and try again
+            NOTIFICATION_ID_FILE.unlink()
+            notify(title, body)
+            return
+        raise
 
     Path(NOTIFICATION_ID_FILE).write_text(str(notification.props.id))
 
