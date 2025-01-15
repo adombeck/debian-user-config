@@ -21,6 +21,7 @@ JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
 
+ALT = len(sys.argv) > 1 and sys.argv[1] == "--alt"
 
 class Editor:
     def open(self, path, line_number=None):
@@ -72,8 +73,10 @@ class Cursor(VSCode):
         self.command = ["cursor"]
         self.name = "Cursor"
 
-
-EDITOR = Cursor()
+if ALT:
+    EDITOR = IntelliJ()
+else:
+    EDITOR = Cursor()
 
 
 def notify(title, body):
