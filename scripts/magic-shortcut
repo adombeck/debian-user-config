@@ -106,6 +106,8 @@ def notify(title, body):
 def main():
     Notify.init("local.magic-shortcut")
 
+    path, line_number = None, None
+
     # Get the clipboard content via wl-clipboard (this assumes Wayland)
     clipboard_content = subprocess.run(
         ["wl-paste"],
@@ -143,27 +145,24 @@ def main():
         path = match.group(1)
         line_number = match.group(2)
         print(f"Opening Python stacktrace {path}", file=sys.stderr)
-        EDITOR.open(path, line_number)
-        return
 
     # If the clipboard content is a git diff, open the files in IntelliJ
     match = GIT_DIFF_PATH_REGEX.match(clipboard_content)
     if match:
         path = match.group(1)
         print(f"Opening git diff {path}", file=sys.stderr)
-        EDITOR.open(path)
-        return
 
     # If the clipboard content is a path to an existing file (optionally
     # with a line number), open the file in IntelliJ
-    if ':' in clipboard_content:
+    if not path and ':' in clipboard_content:
         # We want to support both "path/to/file:line_number" and
         # "path/to/file:line_number:" (the latter is shown by `git diff`),
         # so we ignore everything after the second colon.
         parts = clipboard_content.split(':')
         path, line_number = parts[0], parts[1]
-    else:
+    elif not path:
         path, line_number = clipboard_content, None
+
     path = Path(path)
     if path.exists():
         print(f"Trying {path}", file=sys.stderr)
