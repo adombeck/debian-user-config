@@ -74,9 +74,9 @@ class Cursor(VSCode):
         self.name = "Cursor"
 
 if ALT:
-    EDITOR = IntelliJ()
-else:
     EDITOR = Cursor()
+else:
+    EDITOR = IntelliJ()
 
 
 def notify(title, body):
