@@ -14,7 +14,7 @@ from gi.repository import Notify
 # so that they replace each other's notifications.
 NOTIFICATION_ID_FILE = Path(f"/run/user/{os.getuid()}/notification-id")
 
-PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+), in .*')
+PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+).*')
 GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
 JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
 
