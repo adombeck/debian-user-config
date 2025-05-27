@@ -2,69 +2,59 @@
 
 set -e
 set -u
+set -x
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 maybe_create_symlink() {
   local source="${1}"
   local target
-  target="$HOME/$(realpath --relative-to="$DIR" "${source}")"
-  echo "target: $target"
-
-  if [[ "$f" == "$DIR/.gitmodules" ]] || [[ "${source}" == "$DIR/.nfs"* ]]; then
-    echo "Skipping ${source}"
-    return
-  fi
-
-  # If the target is a .d directory, create symlinks for the config
-  # files in the directory, instead of for the directory itself.
-  # This allows the user to still put their own config files in there
-  # without committing them to to git.
-  if [ -d "${source}" ] && [ "${source: -2}" = ".d" ]; then
-    mkdir -p "${target}"
-    for f in "${source}"/*; do
-      maybe_create_symlink "$f"
-    done
-    return
-  fi
+  target="$HOME/$(realpath --no-symlinks --relative-to="$DIR" "${source}")"
+  echo >&2 "target: $target"
 
   # Check if the dotfile is already present in the home directory
   if [ -L "${target}" ]; then
     # The file is a symlink, so it's probably safe to just delete it.
-    echo "Updating symlink for ${source}"
+    echo >&2 "Updating symlink for ${source}"
     rm "${target}"
     ln -s "${source}" "${target}"
     return
   fi
 
   if [ -e "${target}" ]; then
-    echo -e "The file ${target} already exists.\nDo you want to move the file to ${target}.orig? Else it will be skipped. (y/N) "
+    echo >&2 -e "The file ${target} already exists.\nDo you want to move the file to ${target}.orig? Else it will be skipped. (y/N) "
     read
     if [ "$REPLY" != "y" ]; then
-      echo "Skipping ${source}"
+      echo >&2 "Skipping ${source}"
       return
     else
       mv -i "${target}" "${target}.orig"
     fi
   fi
 
-  echo "Creating symlink for ${source}"
+  echo >&2 "Creating symlink for ${source}"
   mkdir -p "$(dirname "${target}")"
   ln -s "${source}" "${target}"
 }
 
 for f in "$DIR"/.[!.]*; do
-  if [ "${f#"${DIR}/"}" = ".config" ]; then
-    find "${f}" -type f | while read c; do
+  if [ "${f#"${DIR}/"}" = ".gitmodules" ] || [[ "${f}" == "$DIR/.nfs"* ]]; then
+    echo "Skipping ${f}"
+    return
+  fi
+
+  name=$(basename "$f")
+  if [ -d "${f}" ] && { [ "$name" = ".config" ] || [ "$name" = ".var" ] || [[ "$name" == *".d" ]]; }; then
+    # For .d directories and the ".config" and ".var" directories, create
+    # symlinks for all files in the directory, instead of the directory itself.
+    # This allows the user to still put their own config files in there without
+    # committing them to to git.
+    while IFS= read -u3 -r -d '' c; do
       maybe_create_symlink "$c"
-    done
-  elif [ "${f#"${DIR}/"}" = ".var" ]; then
-    find "${f}" -type f | while read c; do
-      target="$HOME/$(realpath --relative-to="$DIR" "${c}")"
-      mkdir -p "$(dirname "${target}")"
-      cp "$c" "$target"
-    done
+    done 3< <(find "${f}" -type f -o -type l -print0)
   else
+    # For all other files and directories, just symlink the file or directory
+    # itself.
     maybe_create_symlink "$f"
   fi
 done
