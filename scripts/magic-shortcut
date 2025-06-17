@@ -29,7 +29,7 @@ class Editor:
 
 
 class IntelliJ(Editor):
-    def open(self, path, line_number=None):
+    def open(self, path, project_dir=None, line_number=None):
         command = ["idea"]
         real_path = Path(path)
 
@@ -37,11 +37,16 @@ class IntelliJ(Editor):
             notify("File not found", str(path))
             return
 
+        if project_dir:
+            command += [str(project_dir)]
+
         if line_number:
-            command = command + ['--line', line_number, str(real_path)]
-        else:
-            command = command + [str(real_path)]
+            command += ['--line', str(line_number)]
+
+        command += [str(real_path)]
+
         notify("Opening file in IntelliJ", str(real_path))
+
         print(f"Command: {' '.join(command)}", file=sys.stderr)
         subprocess.run(command)
 
@@ -166,7 +171,7 @@ def main():
     path = Path(path)
     if path.exists():
         print(f"Trying {path}", file=sys.stderr)
-        EDITOR.open(path, line_number)
+        EDITOR.open(path, line_number=line_number)
         return
 
     # If the clipboard content is a relative path below the authd
@@ -174,18 +179,18 @@ def main():
     # IntelliJ
     if not path.is_absolute():
         for project in ["authd", "authd-oidc-brokers"]:
-            project_path = Path(f"~/projects/{project}").expanduser()
-            absolute_path = project_path / path
+            project_dir = Path(f"~/projects/{project}").expanduser()
+            absolute_path = project_dir / path
             if absolute_path.exists():
                 print(f"Trying {absolute_path}", file=sys.stderr)
-                EDITOR.open(absolute_path, line_number)
+                EDITOR.open(absolute_path, project_dir=project_dir, line_number=line_number)
                 return
             # If the path starts with the project directory, remove that part
             if path.parts[0] == project:
-                absolute_path = project_path / Path(*path.parts[1:])
+                absolute_path = project_dir / Path(*path.parts[1:])
                 if absolute_path.exists():
                     print(f"Trying {absolute_path}", file=sys.stderr)
-                    EDITOR.open(absolute_path, line_number)
+                    EDITOR.open(absolute_path, project_dir=project_dir, line_number=line_number)
                     return
 
     # Show a notification
