@@ -119,3 +119,11 @@ set updatetime=250
 
 " Enable spell checking in git commit messages
 autocmd Filetype gitcommit setlocal spell
+
+" Load all .vim files from ~/.vimrc.d/
+if isdirectory(expand('~/.vimrc.d'))
+  for config_file in split(glob('~/.vimrc.d/*.vim'), '\n')
+    execute 'source' config_file
+  endfor
+endif
+
