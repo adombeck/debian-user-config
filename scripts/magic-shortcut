@@ -174,19 +174,17 @@ def main():
         EDITOR.open(path, line_number=line_number)
         return
 
-    # If the clipboard content is a relative path below the authd
-    # or authd-oidc-brokers project directories, open the file in
-    # IntelliJ
+    # If the clipboard content is a relative path to an existing file in
+    # a project directory, open the file in IntelliJ
     if not path.is_absolute():
-        for project in ["authd", "authd-oidc-brokers"]:
-            project_dir = Path(f"~/projects/{project}").expanduser()
+        for project_dir in Path("~/projects").expanduser().iterdir():
             absolute_path = project_dir / path
             if absolute_path.exists():
                 print(f"Trying {absolute_path}", file=sys.stderr)
                 EDITOR.open(absolute_path, project_dir=project_dir, line_number=line_number)
                 return
             # If the path starts with the project directory, remove that part
-            if path.parts[0] == project:
+            if path.parts[0] == project_dir.name:
                 absolute_path = project_dir / Path(*path.parts[1:])
                 if absolute_path.exists():
                     print(f"Trying {absolute_path}", file=sys.stderr)
