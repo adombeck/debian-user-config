@@ -177,7 +177,11 @@ def main():
     # If the clipboard content is a relative path to an existing file in
     # a project directory, open the file in IntelliJ
     if not path.is_absolute():
-        for project_dir in Path("~/projects").expanduser().iterdir():
+        # Get list of project dirs sorted by modification time, most recent first
+        project_dirs = (p for p in Path("~/projects").expanduser().iterdir())
+        project_dirs = sorted(project_dirs, key=lambda p: p.stat().st_mtime, reverse=True)
+
+        for project_dir in project_dirs:
             absolute_path = project_dir / path
             if absolute_path.exists():
                 print(f"Trying {absolute_path}", file=sys.stderr)
