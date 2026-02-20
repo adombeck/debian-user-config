@@ -173,6 +173,10 @@ def main():
         # so we ignore everything after the second colon.
         parts = clipboard_content.split(':')
         path, line_number = parts[0], parts[1]
+    elif not path and '#L' in clipboard_content:
+        # Try splitting on '#L' instead
+        parts = clipboard_content.split('#L')
+        path, line_number = parts[0], parts[1]
     elif not path:
         path, line_number = clipboard_content, None
 
