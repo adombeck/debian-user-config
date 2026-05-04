@@ -18,6 +18,8 @@ PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+).*')
 GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
 JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
 AUTHD_E2E_TEST_HTML_REGEX = re.compile(r'/run/user/\d+/authd-e2e-test-runs/.*\.html')
+GITHUB_RUN_ID_REGEX = re.compile(r'run-\d+')
+GITHUB_RUN_URL = "https://github.com/canonical/authd/actions/runs/"
 
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
@@ -133,12 +135,26 @@ def main():
         subprocess.run(["google-chrome", clipboard_content])
         return
 
+    if GITHUB_RUN_ID_REGEX.match(clipboard_content):
+        url = GITHUB_RUN_URL + clipboard_content.removeprefix("run-")
+        notify("Opening GitHub Actions run in browser", url)
+        # If the default browser is Firefox, we can use `firefox --new-window`
+        # to open the URL in a new window. Otherwise, we just use `xdg-open`.
+        default_web_browser = subprocess.check_output(
+            ["xdg-settings", "get", "default-web-browser"], text=True).strip()
+        if "firefox" in default_web_browser.lower():
+            subprocess.run(["firefox", "--new-window", url])
+        else:
+            subprocess.run(["xdg-open", url])
+        return
+
     # If the clipboard content is a URL, open it in the browser
     if clipboard_content.startswith("http://") or clipboard_content.startswith("https://"):
         notify("Opening URL in browser", clipboard_content)
         # If the default browser is Firefox, we can use `firefox --new-window`
         # to open the URL in a new window. Otherwise, we just use `xdg-open`.
-        if subprocess.check_output(["xdg-settings", "get", "default-web-browser"], text=True).strip().startswith("firefox"):
+        default_web_browser = subprocess.check_output(["xdg-settings", "get", "default-web-browser"], text=True).strip()
+        if "firefox" in default_web_browser.lower():
             subprocess.run(["firefox", "--new-window", clipboard_content])
         else:
             subprocess.run(["xdg-open", clipboard_content])
