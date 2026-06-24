@@ -31,6 +31,17 @@ class Editor:
         raise NotImplementedError
 
 
+def raise_intellij_project(project_dir):
+    subprocess.Popen(
+        ["gdbus", "call", "--session",
+         "--dest", "org.gnome.Shell",
+         "--object-path", "/de/lucaswerkmeister/ActivateWindowByTitle",
+         "--method", "de.lucaswerkmeister.ActivateWindowByTitle.activateBySubstring",
+         f"[{project_dir}]".replace(str(Path.home()), "~")],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
 class IntelliJ(Editor):
     def open(self, path, project_dir=None, line_number=None):
         command = ["idea"]
@@ -42,6 +53,7 @@ class IntelliJ(Editor):
 
         if project_dir:
             command += [str(project_dir)]
+            raise_intellij_project(project_dir)
 
         if line_number:
             command += ['--line', str(line_number)]
