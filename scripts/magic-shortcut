@@ -21,6 +21,11 @@ AUTHD_E2E_TEST_HTML_REGEX = re.compile(r'/run/user/\d+/authd-e2e-test-runs/.*\.h
 GITHUB_RUN_ID_REGEX = re.compile(r'run-\d+')
 GITHUB_RUN_URL = "https://github.com/canonical/authd/actions/runs/"
 
+AUTHD_REPO = Path("~/projects/authd").expanduser()
+GUAKE_DBUS_DEST = "org.guake3.RemoteControl"
+GUAKE_DBUS_OBJECT = "/org/guake3/RemoteControl"
+GUAKE_DBUS_IFACE = "org.guake3.RemoteControl"
+
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
 
@@ -171,6 +176,41 @@ def main():
         else:
             subprocess.run(["xdg-open", clipboard_content])
         return
+
+    # If the clipboard content is a branch name in the authd repo, set up a worktree
+    # and open it in a new Guake tab
+    if AUTHD_REPO.exists():
+        result = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname:short)",
+             f"refs/heads/{clipboard_content}",
+             f"refs/remotes/*/{clipboard_content}"],
+            cwd=AUTHD_REPO,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            worktree_path = AUTHD_REPO.parent / f"authd-{clipboard_content}"
+            notify("Setting up authd worktree", f"Branch: {clipboard_content}")
+            subprocess.run(
+                ["authd-worktree", clipboard_content],
+                cwd=AUTHD_REPO,
+            )
+            subprocess.run(
+                ["gdbus", "call", "--session",
+                 "--dest", GUAKE_DBUS_DEST,
+                 "--object-path", GUAKE_DBUS_OBJECT,
+                 "--method", f"{GUAKE_DBUS_IFACE}.add_tab",
+                 str(worktree_path)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                ["gdbus", "call", "--session",
+                 "--dest", GUAKE_DBUS_DEST,
+                 "--object-path", GUAKE_DBUS_OBJECT,
+                 "--method", f"{GUAKE_DBUS_IFACE}.show"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return
 
     # If the clipboard content is a Jira issue key, open the issue in the browser
     match = JIRA_ISSUE_REGEX.match(clipboard_content)
