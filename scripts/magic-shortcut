@@ -189,7 +189,8 @@ def main():
             text=True,
         )
         if result.returncode == 0 and result.stdout.strip():
-            worktree_path = AUTHD_REPO.parent / f"authd-{clipboard_content}"
+            worktree_dirname = clipboard_content.replace('/', '-')
+            worktree_path = AUTHD_REPO.parent / f"authd-{worktree_dirname}"
             notify("Setting up authd worktree", f"Branch: {clipboard_content}")
             subprocess.run(
                 ["authd-worktree", clipboard_content],
