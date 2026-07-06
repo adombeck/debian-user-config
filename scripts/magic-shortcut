@@ -21,7 +21,9 @@ AUTHD_E2E_TEST_HTML_REGEX = re.compile(r'/run/user/\d+/authd-e2e-test-runs/.*\.h
 GITHUB_RUN_ID_REGEX = re.compile(r'run-\d+')
 GITHUB_RUN_URL = "https://github.com/canonical/authd/actions/runs/"
 GITHUB_CANONICAL_ISSUE_REGEX = re.compile(r'https://github\.com/canonical/[^/]+/issues/\d+')
+JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d+')
 JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
+FIX_ISSUE_SCRIPT = Path("~/projects/authd-scripts/fix-issue").expanduser()
 
 AUTHD_REPO = Path("~/projects/authd").expanduser()
 GUAKE_DBUS_DEST = "org.guake3.RemoteControl"
@@ -168,8 +170,21 @@ def main():
         return
 
     # If the clipboard content is a GitHub issue URL for a canonical repo,
-    # call the jira-claim-issue script if it exists
+    # call the jira-claim-issue script if it exists, then run fix-issue
     if GITHUB_CANONICAL_ISSUE_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
+        notify("Claiming Jira issue", clipboard_content)
+        result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
+                                capture_output=True, text=True)
+        if result.returncode == 0:
+            notify("Jira issue claimed", result.stdout.strip() or clipboard_content)
+        else:
+            notify("Failed to claim Jira issue", result.stderr.strip() or clipboard_content)
+        if FIX_ISSUE_SCRIPT.exists():
+            subprocess.Popen([str(FIX_ISSUE_SCRIPT), clipboard_content])
+        return
+
+    # If the clipboard content is a Jira issue URL, call jira-claim-issue
+    if JIRA_ISSUE_URL_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
         notify("Claiming Jira issue", clipboard_content)
         result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
                                 capture_output=True, text=True)
