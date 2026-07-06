@@ -13,3 +13,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Configure guake terminal
 "$DIR/guake/install.sh"
 
+# Install Copilot CLI extensions
+"$DIR/copilot/install.sh"
+
