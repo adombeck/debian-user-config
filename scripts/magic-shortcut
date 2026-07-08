@@ -8,7 +8,7 @@ from pathlib import Path
 import gi
 
 gi.require_version('Notify', '0.7')
-from gi.repository import Notify
+from gi.repository import GLib, Notify
 
 # This file is shared by all the scripts I use which display notifications,
 # so that they replace each other's notifications.
@@ -108,7 +108,7 @@ else:
     EDITOR = IntelliJ()
 
 
-def notify(title, body):
+def notify(title, body, copy_text=None, copy_label="Copy"):
     if NOTIFICATION_ID_FILE.exists():
         id_ = int(NOTIFICATION_ID_FILE.read_text().strip())
     else:
@@ -119,17 +119,55 @@ def notify(title, body):
         body=body,
         id=id_,
     )
+
+    # If copy_text is provided, add an action button that copies it to the
+    # clipboard when clicked. This requires a GLib main loop to be running so
+    # that the action callback can fire.
+    loop = None
+    if copy_text is not None:
+        loop = GLib.MainLoop()
+
+        def on_copy(_notification, _action, *_args):
+            subprocess.run(["wl-copy", copy_text])
+            loop.quit()
+
+        # "default" fires when the notification body itself is clicked (no need
+        # to hover to reveal the button), "copy" is the explicit action button.
+        notification.add_action("default", copy_label, on_copy)
+        notification.add_action("copy", copy_label, on_copy)
+        notification.connect("closed", lambda _notification: loop.quit())
+
     try:
         notification.show()
     except gi.repository.GLib.Error as e:
         if "Invalid notification ID" in str(e):
             # Delete the notification file and try again
             NOTIFICATION_ID_FILE.unlink()
-            notify(title, body)
+            notify(title, body, copy_text=copy_text, copy_label=copy_label)
             return
         raise
 
     Path(NOTIFICATION_ID_FILE).write_text(str(notification.props.id))
+
+    if loop is not None:
+        # Keep the main loop running so the action button works, but don't hang
+        # forever if the user never interacts with the notification.
+        GLib.timeout_add_seconds(60, loop.quit)
+        loop.run()
+
+
+def notify_claim_result(result, clipboard_content):
+    if result.returncode != 0:
+        notify("Failed to claim Jira issue", result.stderr.strip() or clipboard_content)
+        return
+
+    match = JIRA_ISSUE_REGEX.search(result.stdout)
+    if match:
+        issue_key = match.group(0)
+        notify("Jira issue claimed", issue_key,
+               copy_text=issue_key, copy_label=f"Copy {issue_key}")
+    else:
+        notify("Jira issue claimed", clipboard_content)
 
 
 def main():
@@ -175,12 +213,9 @@ def main():
         notify("Claiming Jira issue", clipboard_content)
         result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
                                 capture_output=True, text=True)
-        if result.returncode == 0:
-            notify("Jira issue claimed", result.stdout.strip() or clipboard_content)
-        else:
-            notify("Failed to claim Jira issue", result.stderr.strip() or clipboard_content)
         if FIX_ISSUE_SCRIPT.exists():
             subprocess.Popen([str(FIX_ISSUE_SCRIPT), clipboard_content])
+        notify_claim_result(result, clipboard_content)
         return
 
     # If the clipboard content is a Jira issue URL, call jira-claim-issue
@@ -188,10 +223,7 @@ def main():
         notify("Claiming Jira issue", clipboard_content)
         result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
                                 capture_output=True, text=True)
-        if result.returncode == 0:
-            notify("Jira issue claimed", result.stdout.strip() or clipboard_content)
-        else:
-            notify("Failed to claim Jira issue", result.stderr.strip() or clipboard_content)
+        notify_claim_result(result, clipboard_content)
         return
 
     # If the clipboard content is a URL, open it in the browser
