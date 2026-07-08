@@ -1,8 +1,7 @@
 // Extension: guake-notify
-// Rich desktop notifications for session completion with guake tab switching.
-// When the agent finishes, sends a desktop notification showing the session
-// name and an action button that switches to the guake tab where the session
-// is running.
+// Rich desktop notifications when the agent is idle (waiting for input).
+// Sends a desktop notification showing the session name and an action button
+// that switches to the guake tab where the session is running.
 
 import { joinSession } from "@github/copilot-sdk/extension";
 import { execFile, spawn } from "node:child_process";
@@ -23,52 +22,58 @@ async function getGuakeTabIndex() {
 
 let guakeTabIndex = null;
 
+/** Send a desktop notification with an optional "Switch to tab" action button. */
+function sendNotification(title, tabIndex) {
+    const notifyArgs = ["--app-name=Copilot CLI", "--icon=github"];
+
+    if (tabIndex !== null) {
+        // --action implies --wait; use a detached shell so we don't block.
+        notifyArgs.push("--action=Switch to tab");
+    }
+
+    notifyArgs.push("Copilot CLI", title);
+
+    const switchCmd = tabIndex !== null ? `guake --show; guake -s ${tabIndex}` : "";
+
+    // prettier-ignore
+    const shellScript = tabIndex !== null
+        ? `action=$(notify-send ${notifyArgs.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}); [ "$action" = "0" ] && { ${switchCmd}; } || true`
+        : `notify-send ${notifyArgs.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
+
+    const child = spawn("bash", ["-c", shellScript], {
+        detached: true,
+        stdio: "ignore",
+    });
+    child.unref();
+}
+
 const session = await joinSession({
     tools: [],
     hooks: {
         onSessionStart: async (_input, _invocation) => {
             guakeTabIndex = await getGuakeTabIndex();
         },
-
-        onSessionEnd: async (_input, invocation) => {
-            // Resolve the session name; fall back to the session ID prefix.
-            let sessionName = null;
-            try {
-                const result = await session.rpc.name.get();
-                if (result?.name) sessionName = result.name;
-            } catch {
-                // ignore — RPC may not be available during shutdown
-            }
-            const title = sessionName ?? `Session ${invocation.sessionId.slice(0, 8)}`;
-
-            // Build the notify-send command. Using --action implies --wait, so we
-            // detach a helper shell process to avoid blocking the shutdown path.
-            const tabIndex = guakeTabIndex;
-            const notifyArgs = ["--app-name=Copilot CLI", "--icon=github"];
-
-            if (tabIndex !== null) {
-                // Add an action button; the action name "0" is printed to stdout
-                // when the user clicks it.
-                notifyArgs.push("--action=Switch to tab");
-            }
-
-            notifyArgs.push("Copilot CLI", title);
-
-            // Inline shell script so the detached process is fully self-contained.
-            const switchCmd = tabIndex !== null
-                ? `guake --show; guake -s ${tabIndex}`
-                : "";
-
-            // prettier-ignore
-            const shellScript = tabIndex !== null
-                ? `action=$(notify-send ${notifyArgs.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}); [ "$action" = "0" ] && { ${switchCmd}; } || true`
-                : `notify-send ${notifyArgs.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
-
-            const child = spawn("bash", ["-c", shellScript], {
-                detached: true,
-                stdio: "ignore",
-            });
-            child.unref();
-        },
     },
+});
+
+// Track whether we've seen at least one user message so we don't notify on the
+// initial idle state that fires before the user has sent anything.
+let hasUserMessage = false;
+session.on("user.message", () => {
+    hasUserMessage = true;
+});
+
+session.on("session.idle", async (event) => {
+    if (!hasUserMessage || event.data?.aborted) return;
+
+    let sessionName = null;
+    try {
+        const result = await session.rpc.name.get();
+        if (result?.name) sessionName = result.name;
+    } catch {
+        // ignore — RPC may not be available
+    }
+    const title = sessionName ?? "Copilot CLI";
+
+    sendNotification(title, guakeTabIndex);
 });
