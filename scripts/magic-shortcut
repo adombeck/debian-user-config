@@ -126,6 +126,9 @@ def notify(title, body, copy_text=None, copy_label="Copy"):
     loop = None
     if copy_text is not None:
         loop = GLib.MainLoop()
+        # Explicitly mark as non-transient so the notification persists in the
+        # notification list/tray and isn't treated as a popup-only notification.
+        notification.set_hint("transient", GLib.Variant("b", False))
 
         def on_copy(_notification, _action, *_args):
             subprocess.run(["wl-copy", copy_text])
