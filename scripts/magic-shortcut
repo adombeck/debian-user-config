@@ -33,8 +33,6 @@ GUAKE_DBUS_IFACE = "org.guake3.RemoteControl"
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
 
-ALT = len(sys.argv) > 1 and sys.argv[1] == "--alt"
-
 class Editor:
     def open(self, path, line_number=None):
         raise NotImplementedError
@@ -75,37 +73,7 @@ class IntelliJ(Editor):
         subprocess.run(command)
 
 
-class VSCode(Editor):
-    def __init__(self):
-        self.command = ["code"]
-        self.name = "VS Code"
-
-    def open(self, path, line_number=None):
-        real_path = Path(path)
-
-        if not real_path.exists():
-            notify("File not found", str(path))
-            return
-
-        if line_number:
-            command = self.command + ['--goto', f"{real_path}:{line_number}"]
-        else:
-            command = self.command + [str(real_path)]
-        notify(f"Opening file in {self.name}", str(real_path))
-        print(f"Command: {' '.join(command)}", file=sys.stderr)
-        subprocess.run(command)
-
-
-class Cursor(VSCode):
-    def __init__(self):
-        super().__init__()
-        self.command = ["cursor"]
-        self.name = "Cursor"
-
-if ALT:
-    EDITOR = Cursor()
-else:
-    EDITOR = IntelliJ()
+EDITOR = IntelliJ()
 
 
 def notify(title, body, copy_text=None, copy_label="Copy"):
