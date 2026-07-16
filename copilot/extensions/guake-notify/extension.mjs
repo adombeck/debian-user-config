@@ -24,7 +24,7 @@ let guakeTabIndex = null;
 
 /** Send a desktop notification with an optional "Switch to tab" action button. */
 function sendNotification(title, tabIndex) {
-    const notifyArgs = ["--app-name=Copilot CLI", "--icon=github"];
+    const notifyArgs = ["--app-name=Copilot CLI", "--icon=github", "--transient"];
 
     if (tabIndex !== null) {
         // --action implies --wait; use a detached shell so we don't block.
