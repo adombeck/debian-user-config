@@ -1,0 +1,9 @@
+{
+  "uuid": "notification-activator@adrian.dombeck",
+  "name": "Notification Activator",
+  "description": "Activate the current or most recently shown notification with a keyboard shortcut.",
+  "version": 1,
+  "shell-version": [
+    "50"
+  ]
+}

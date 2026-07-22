@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.notification-activator"
+          path="/org/gnome/shell/extensions/notification-activator/">
+    <key name="activate-notification" type="as">
+      <default>['&lt;Super&gt;&lt;Shift&gt;n']</default>
+      <summary>Activate notification shortcut</summary>
+      <description>Shortcut that activates the currently displayed or most recently shown notification.</description>
+    </key>
+  </schema>
+</schemalist>
