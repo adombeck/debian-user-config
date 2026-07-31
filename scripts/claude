@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# claude-sandboxed.sh — run Claude Code in a bubblewrap sandbox with
+# filesystem access restricted to ~/projects (read-write) and a minimal
+# read-only base system. Network is left up, since Claude Code needs to
+# reach api.anthropic.com; narrow this further with a network namespace +
+# proxy if you want a domain allowlist too.
+#
+# Usage: ./claude-sandboxed.sh [claude args...]
+
+set -euo pipefail
+
+PROJECTS_DIR="${HOME}/projects"
+CLAUDE_CONFIG_DIR="${HOME}/.claude"
+CLAUDE_JSON="${HOME}/.claude.json"
+
+if [[ ! -d "$PROJECTS_DIR" ]]; then
+    echo "error: $PROJECTS_DIR does not exist" >&2
+    exit 1
+fi
+
+# Resolve real paths so a symlinked cwd still matches under PROJECTS_DIR.
+PROJECTS_DIR="$(realpath "$PROJECTS_DIR")"
+CWD="$(realpath "$PWD")"
+
+case "$CWD" in
+    "$PROJECTS_DIR"|"$PROJECTS_DIR"/*)
+        WORKDIR="$CWD"
+        ;;
+    *)
+        echo "error: current directory ($CWD) is not inside $PROJECTS_DIR" >&2
+        exit 1
+        ;;
+esac
+
+if ! command -v bwrap >/dev/null 2>&1; then
+    echo "error: bubblewrap (bwrap) not found. Install with: sudo apt install bubblewrap" >&2
+    exit 1
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+    echo "error: claude CLI not found on PATH" >&2
+    exit 1
+fi
+
+CLAUDE_DIR="$(dirname "$(command -v claude)")"
+CLAUDE_BIN="${CLAUDE_DIR}/claude.real"
+
+if [[ ! -x "$CLAUDE_BIN" ]]; then
+    echo "error: $CLAUDE_BIN not found or not executable" >&2
+    exit 1
+fi
+
+# Build bind args for Claude's own config, creating them first if absent so
+# bwrap has something to bind (bwrap --bind requires the source to exist).
+mkdir -p "$CLAUDE_CONFIG_DIR"
+touch "$CLAUDE_JSON"
+
+exec bwrap \
+    --unshare-all \
+    --share-net \
+    --die-with-parent \
+    --new-session \
+    \
+    --ro-bind /usr /usr \
+    --ro-bind /bin /bin \
+    --ro-bind /lib /lib \
+    --ro-bind-try /lib64 /lib64 \
+    --ro-bind-try /snap /snap \
+    --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
+    --ro-bind-try "${HOME}/go/bin" "${HOME}/go/bin" \
+    --ro-bind-try /etc/alternatives /etc/alternatives \
+    --ro-bind /etc/resolv.conf /etc/resolv.conf \
+    --ro-bind /etc/ssl /etc/ssl \
+    --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf \
+    --ro-bind /etc/hosts /etc/hosts \
+    --ro-bind /etc/passwd /etc/passwd \
+    --ro-bind /etc/group /etc/group \
+    --ro-bind "$CLAUDE_BIN" "$CLAUDE_BIN" \
+    \
+    --dev /dev \
+    --proc /proc \
+    --tmpfs /tmp \
+    \
+    --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
+    --bind "$CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" \
+    --bind "$CLAUDE_JSON" "$CLAUDE_JSON" \
+    \
+    --setenv HOME "$HOME" \
+    --setenv CLAUDE_CONFIG_DIR "$CLAUDE_CONFIG_DIR" \
+    --setenv PATH "$PATH" \
+    \
+    --chdir "$WORKDIR" \
+    "$CLAUDE_BIN" "$@"
+
