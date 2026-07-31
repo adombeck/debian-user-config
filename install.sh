@@ -16,3 +16,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Install Copilot CLI extensions
 "$DIR/copilot/install.sh"
 
+# Install user scripts
+"$DIR/scripts/install.sh"
+
