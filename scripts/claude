@@ -2,9 +2,10 @@
 #
 # claude-sandboxed.sh — run Claude Code in a bubblewrap sandbox with
 # filesystem access restricted to ~/projects (read-write) and a minimal
-# read-only base system. Network is left up, since Claude Code needs to
-# reach api.anthropic.com; narrow this further with a network namespace +
-# proxy if you want a domain allowlist too.
+# read-only base system. If the cwd is outside ~/projects, it's bind-mounted
+# in as well so Claude can still work there. Network is left up, since
+# Claude Code needs to reach api.anthropic.com; narrow this further with a
+# network namespace + proxy if you want a domain allowlist too.
 #
 # Usage: ./claude-sandboxed.sh [claude args...]
 
@@ -22,14 +23,16 @@ fi
 # Resolve real paths so a symlinked cwd still matches under PROJECTS_DIR.
 PROJECTS_DIR="$(realpath "$PROJECTS_DIR")"
 CWD="$(realpath "$PWD")"
+WORKDIR="$CWD"
 
+# If the cwd isn't already covered by the PROJECTS_DIR bind mount, bind it
+# in separately so Claude can still read/write it.
+EXTRA_BIND_ARGS=()
 case "$CWD" in
     "$PROJECTS_DIR"|"$PROJECTS_DIR"/*)
-        WORKDIR="$CWD"
         ;;
     *)
-        echo "error: current directory ($CWD) is not inside $PROJECTS_DIR" >&2
-        exit 1
+        EXTRA_BIND_ARGS=(--bind "$CWD" "$CWD")
         ;;
 esac
 
@@ -83,6 +86,7 @@ exec bwrap \
     --tmpfs /tmp \
     \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
+    "${EXTRA_BIND_ARGS[@]}" \
     --bind "$CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" \
     --bind "$CLAUDE_JSON" "$CLAUDE_JSON" \
     \
