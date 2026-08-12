@@ -25,7 +25,7 @@ JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d
 JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
 FIX_ISSUE_SCRIPT = Path("~/projects/authd-scripts/fix-issue").expanduser()
 GITHUB_REVIEW_COMMENT_URL_REGEX = re.compile(
-    r'https://github\.com/[^/]+/[^/]+/pull/\d+#discussion_r\d+')
+    r'https://github\.com/[^/]+/[^/]+/pull/\d+#(discussion_r\d+|issuecomment-\d+)')
 ADDRESS_REVIEW_COMMENT_SCRIPT = Path("~/projects/authd-scripts/address-review-comment").expanduser()
 
 AUTHD_REPO = Path("~/projects/authd").expanduser()
@@ -194,8 +194,8 @@ def main():
         notify_claim_result(result, clipboard_content)
         return
 
-    # If the clipboard content is a URL to a GitHub PR review comment, call
-    # address-review-comment
+    # If the clipboard content is a URL to a GitHub PR review comment or a
+    # PR issue comment, call address-review-comment
     if GITHUB_REVIEW_COMMENT_URL_REGEX.match(clipboard_content) and ADDRESS_REVIEW_COMMENT_SCRIPT.exists():
         notify("Addressing GitHub review comment", clipboard_content)
         subprocess.Popen([str(ADDRESS_REVIEW_COMMENT_SCRIPT), clipboard_content])
