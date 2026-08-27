@@ -7,6 +7,13 @@
 # Claude Code needs to reach api.anthropic.com; narrow this further with a
 # network namespace + proxy if you want a domain allowlist too.
 #
+# Installation from the repository root:
+#   mv ~/.local/bin/claude ~/.local/bin/claude.real
+#   ./scripts/install.sh
+#
+# The first command preserves the original Claude executable; the installer
+# then creates ~/.local/bin/claude as a symlink to this wrapper.
+#
 # Usage: ./claude-sandboxed.sh [claude args...]
 
 set -euo pipefail
@@ -96,4 +103,3 @@ exec bwrap \
     \
     --chdir "$WORKDIR" \
     "$CLAUDE_BIN" "$@"
-
