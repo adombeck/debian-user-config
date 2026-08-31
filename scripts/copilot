@@ -157,6 +157,36 @@ elif [[ -e "$SSH_KNOWN_HOSTS" ]]; then
     SSH_KNOWN_HOSTS_BIND_ARGS=(--ro-bind "$SSH_KNOWN_HOSTS" "$SSH_KNOWN_HOSTS")
 fi
 
+# Expose the native Wayland clipboard connection without exposing the host
+# runtime directory.
+WAYLAND_SOCKET_BIND_ARGS=()
+WAYLAND_DISPLAY_IN_SANDBOX=
+WAYLAND_SOCKET_TARGET=
+if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    if [[ "$WAYLAND_DISPLAY" == /* ]]; then
+        WAYLAND_SOCKET="$WAYLAND_DISPLAY"
+        WAYLAND_DISPLAY_IN_SANDBOX=/tmp/copilot-runtime/wayland
+        WAYLAND_SOCKET_TARGET="$WAYLAND_DISPLAY_IN_SANDBOX"
+    else
+        if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+            echo "error: XDG_RUNTIME_DIR is required for the Wayland display socket" >&2
+            exit 1
+        fi
+        WAYLAND_SOCKET="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+        WAYLAND_DISPLAY_IN_SANDBOX="$WAYLAND_DISPLAY"
+        if [[ "$WAYLAND_DISPLAY" == */* ]]; then
+            echo "error: unsupported Wayland display name: $WAYLAND_DISPLAY" >&2
+            exit 1
+        fi
+        WAYLAND_SOCKET_TARGET="/tmp/copilot-runtime/$WAYLAND_DISPLAY"
+    fi
+    if [[ ! -S "$WAYLAND_SOCKET" ]]; then
+        echo "error: Wayland display path is not a Unix socket: $WAYLAND_SOCKET" >&2
+        exit 1
+    fi
+    WAYLAND_SOCKET_BIND_ARGS=(--bind "$WAYLAND_SOCKET" "$WAYLAND_SOCKET_TARGET")
+fi
+
 # dbus-daemon requires a passwd and group entry for the sandboxed UID. The
 # host's NSS configuration provides those entries, but they are not always in
 # /etc/passwd and /etc/group.
@@ -190,6 +220,12 @@ SANDBOX_ENV_ARGS=(
 )
 if [[ -n "${TERM:-}" ]]; then
     SANDBOX_ENV_ARGS+=(--setenv TERM "$TERM")
+fi
+if [[ -n "${DISPLAY:-}" ]]; then
+    SANDBOX_ENV_ARGS+=(--setenv DISPLAY "$DISPLAY")
+fi
+if [[ -n "$WAYLAND_DISPLAY_IN_SANDBOX" ]]; then
+    SANDBOX_ENV_ARGS+=(--setenv WAYLAND_DISPLAY "$WAYLAND_DISPLAY_IN_SANDBOX")
 fi
 if [[ -n "${LANG:-}" ]]; then
     SANDBOX_ENV_ARGS+=(--setenv LANG "$LANG")
@@ -248,6 +284,7 @@ exec bwrap \
     --tmpfs /tmp \
     --dir /tmp/copilot-runtime \
     --chmod 700 /tmp/copilot-runtime \
+    "${WAYLAND_SOCKET_BIND_ARGS[@]}" \
     "${SSH_AGENT_BIND_ARGS[@]}" \
     "${SSH_KNOWN_HOSTS_BIND_ARGS[@]}" \
     \
