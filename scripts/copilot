@@ -107,6 +107,20 @@ fi
 mkdir -p "$GH_CONFIG_HOME"
 chmod 700 "$GH_CONFIG_HOME"
 
+# Expose Git's global configuration at its normal path as a read-only
+# snapshot. Reading through a file descriptor also supports symlinked dotfile
+# installations while snapshotting the file.
+GIT_CONFIG_PATH="$HOME/.gitconfig"
+GIT_CONFIG_BIND_ARGS=()
+if [[ -L "$GIT_CONFIG_PATH" || -e "$GIT_CONFIG_PATH" ]]; then
+    if [[ ! -f "$GIT_CONFIG_PATH" || ! -r "$GIT_CONFIG_PATH" ]]; then
+        echo "error: Git config is not a readable regular file: $GIT_CONFIG_PATH" >&2
+        exit 1
+    fi
+    exec 11< "$GIT_CONFIG_PATH"
+    GIT_CONFIG_BIND_ARGS=(--ro-bind-data 11 "$GIT_CONFIG_PATH")
+fi
+
 # Prefer an explicitly selected socket, then the dedicated Copilot socket,
 # then the host's current SSH agent. Set COPILOT_SSH_AUTH_SOCK to override
 # both defaults.
@@ -226,6 +240,7 @@ exec bwrap \
     --ro-bind-data 9 /etc/passwd \
     --ro-bind-data 10 /etc/group \
     --ro-bind "$COPILOT_BIN" "$COPILOT_BIN" \
+    "${GIT_CONFIG_BIND_ARGS[@]}" \
     \
     --dev /dev \
     --bind /dev/null /dev/log \
