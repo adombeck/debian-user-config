@@ -254,6 +254,7 @@ if [[ "$SSH_AGENT_ENABLED" == true ]]; then
     SANDBOX_ENV_ARGS+=(--setenv SSH_AUTH_SOCK /tmp/copilot-runtime/ssh-agent)
 fi
 
+# Expose only read-only libvirt metadata, including VM vsock CIDs.
 exec bwrap \
     --unshare-all \
     --share-net \
@@ -284,6 +285,8 @@ exec bwrap \
     --tmpfs /tmp \
     --dir /tmp/copilot-runtime \
     --chmod 700 /tmp/copilot-runtime \
+    --dir /var/run/libvirt \
+    --bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock \
     "${WAYLAND_SOCKET_BIND_ARGS[@]}" \
     "${SSH_AGENT_BIND_ARGS[@]}" \
     "${SSH_KNOWN_HOSTS_BIND_ARGS[@]}" \
