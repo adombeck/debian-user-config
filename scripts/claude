@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# claude-sandboxed.sh — run Claude Code in a bubblewrap sandbox with
-# filesystem access restricted to ~/projects (read-write) and a minimal
-# read-only base system. If the cwd is outside ~/projects, it's bind-mounted
-# in as well so Claude can still work there. Network is left up, since
-# Claude Code needs to reach api.anthropic.com; narrow this further with a
-# network namespace + proxy if you want a domain allowlist too.
+# Run Claude Code in a bubblewrap sandbox with filesystem access restricted to
+# ~/projects (read-write) and a minimal read-only base system. If the cwd is
+# outside ~/projects, it's bind-mounted in as well so Claude can still work
+# there. Network is left up, since Claude Code needs to reach
+# api.anthropic.com; narrow this further with a network namespace + proxy if
+# you want a domain allowlist too.
 #
 # Installation from the repository root:
 #   mv ~/.local/bin/claude ~/.local/bin/claude.real
@@ -14,7 +14,7 @@
 # The first command preserves the original Claude executable; the installer
 # then creates ~/.local/bin/claude as a symlink to this wrapper.
 #
-# Usage: ./claude-sandboxed.sh [claude args...]
+# Usage: ./claude [claude args...]
 
 set -euo pipefail
 
