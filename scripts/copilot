@@ -11,6 +11,17 @@
 # Rootless Podman may be used inside the sandbox with private storage. Host
 # Podman sockets and host container storage are never exposed.
 #
+# Libvirt is exposed through its read-only socket by default. Pass
+# --allow-e2e-tests for VM lifecycle and provisioning workflows only when
+# necessary. WARNING: that profile exposes the host's read-write libvirt
+# system socket, which effectively grants root access on the host despite the
+# sandbox. Sudo commands from the sandbox are also forwarded to a host-side
+# helper and executed by host sudo under your normal sudoers policy. Only the
+# read-only guestfish cloud-init checks are allowlisted; all other sandbox sudo
+# requests are rejected. See
+# https://libvirt.org/daemons.html#monolithic-sockets and use this mode only
+# with fully trusted prompts and code.
+#
 # On Ubuntu systems with bwrap-userns-restrict, install the scoped AppArmor
 # transition once with: ./apparmor/install.sh
 #
@@ -28,13 +39,27 @@
 # The first command preserves the original Copilot executable; the installer
 # then creates ~/.local/bin/copilot as a symlink to this wrapper.
 #
-# Usage: copilot [copilot args...]
+# Usage: copilot [--allow-e2e-tests] [copilot args...]
 
 set -euo pipefail
 
 if [[ "$(id -u)" -eq 0 ]]; then
     echo "error: the Copilot sandbox must not be run as root" >&2
     exit 1
+fi
+
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+
+ALLOW_E2E_TESTS=false
+if [[ "${1:-}" == "--allow-e2e-tests" ]]; then
+    ALLOW_E2E_TESTS=true
+    shift
+    cat >&2 <<'EOF'
+warning: --allow-e2e-tests exposes the host's read-write libvirt system socket
+warning: access to that socket effectively grants root access on the host despite the sandbox
+warning: use this mode only with fully trusted prompts and code
+see: https://libvirt.org/daemons.html#monolithic-sockets
+EOF
 fi
 
 PROJECTS_DIR="${HOME}/projects"
@@ -84,6 +109,34 @@ COPILOT_BIN="${COPILOT_DIR}/copilot.real"
 if [[ ! -x "$COPILOT_BIN" ]]; then
     echo "error: $COPILOT_BIN not found or not executable" >&2
     exit 1
+fi
+
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+    NO_NEW_PRIVS=
+    while read -r status_name status_value _; do
+        if [[ "$status_name" == NoNewPrivs: ]]; then
+            NO_NEW_PRIVS="$status_value"
+            break
+        fi
+    done </proc/self/status
+    if [[ "$NO_NEW_PRIVS" == 1 ]]; then
+        echo "error: --allow-e2e-tests must be started outside a no_new_privileges sandbox" >&2
+        exit 1
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "error: sudo is required for --allow-e2e-tests" >&2
+        exit 1
+    fi
+    if ! sudo -v; then
+        echo "error: could not authenticate sudo for --allow-e2e-tests" >&2
+        exit 1
+    fi
+    for helper in copilot-e2e-sudo-helper copilot-e2e-sudo; do
+        if [[ ! -x "$SCRIPT_DIR/$helper" ]]; then
+            echo "error: E2E helper is missing or not executable: $SCRIPT_DIR/$helper" >&2
+            exit 1
+        fi
+    done
 fi
 
 # Stage a private, read-only Podman executable at the path covered by the
@@ -137,6 +190,86 @@ fi
 # something to bind (bwrap --bind requires the source to exist).
 mkdir -p "$COPILOT_HOME"
 COPILOT_HOME="$(realpath "$COPILOT_HOME")"
+
+E2E_SUDO_SOCKET=
+E2E_SUDO_HELPER_PID=
+E2E_SUDO_CLIENT_BIND_ARGS=()
+E2E_SUDO_ALLOWED_IMAGE_ROOTS=()
+E2E_SSH_PUBLIC_KEY_PARENT_ARGS=()
+E2E_SSH_PUBLIC_KEY_BIND_ARGS=()
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+    E2E_SUDO_SOCKET="$COPILOT_HOME/e2e-sudo.sock"
+    if [[ -L "$E2E_SUDO_SOCKET" ]]; then
+        echo "error: refusing to use symlinked E2E sudo socket: $E2E_SUDO_SOCKET" >&2
+        exit 1
+    elif [[ -e "$E2E_SUDO_SOCKET" ]]; then
+        if [[ ! -S "$E2E_SUDO_SOCKET" ]]; then
+            echo "error: E2E sudo socket path is not a Unix socket: $E2E_SUDO_SOCKET" >&2
+            exit 1
+        fi
+        rm -f "$E2E_SUDO_SOCKET"
+    fi
+
+    E2E_SUDO_CLIENT_DIR="$COPILOT_HOME/e2e-sudo"
+    if [[ -L "$E2E_SUDO_CLIENT_DIR" ]]; then
+        echo "error: refusing to use symlinked E2E sudo client directory: $E2E_SUDO_CLIENT_DIR" >&2
+        exit 1
+    fi
+    mkdir -p "$E2E_SUDO_CLIENT_DIR"
+    chmod 700 "$E2E_SUDO_CLIENT_DIR"
+    E2E_SUDO_CLIENT="$E2E_SUDO_CLIENT_DIR/sudo"
+    if [[ -L "$E2E_SUDO_CLIENT" ]]; then
+        echo "error: refusing to use symlinked E2E sudo client: $E2E_SUDO_CLIENT" >&2
+        exit 1
+    elif [[ -e "$E2E_SUDO_CLIENT" && ! -f "$E2E_SUDO_CLIENT" ]]; then
+        echo "error: E2E sudo client path is not a regular file: $E2E_SUDO_CLIENT" >&2
+        exit 1
+    fi
+    if [[ ! -e "$E2E_SUDO_CLIENT" ]] ||
+        ! cmp -s "$SCRIPT_DIR/copilot-e2e-sudo" "$E2E_SUDO_CLIENT"; then
+        E2E_SUDO_CLIENT_TEMP="$(mktemp "$E2E_SUDO_CLIENT_DIR/.sudo.XXXXXX")"
+        cp "$SCRIPT_DIR/copilot-e2e-sudo" "$E2E_SUDO_CLIENT_TEMP"
+        chmod 755 "$E2E_SUDO_CLIENT_TEMP"
+        mv -f "$E2E_SUDO_CLIENT_TEMP" "$E2E_SUDO_CLIENT"
+    fi
+    E2E_SUDO_CLIENT_BIND_ARGS=(--ro-bind "$E2E_SUDO_CLIENT_DIR" "$E2E_SUDO_CLIENT_DIR")
+    SANDBOX_PATH="$E2E_SUDO_CLIENT_DIR:$SANDBOX_PATH"
+
+    # Mount only the public key required by authd provisioning. If its file is
+    # absent, a single loaded agent identity is sufficient to recreate it.
+    AUTHD_E2E_SSH_PUBLIC_KEY="$HOME/.ssh/id_ed25519_canonical.pub"
+    AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE=
+    if [[ -s "$AUTHD_E2E_SSH_PUBLIC_KEY" && -r "$AUTHD_E2E_SSH_PUBLIC_KEY" ]]; then
+        AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE="$(realpath "$AUTHD_E2E_SSH_PUBLIC_KEY")"
+    else
+        E2E_KEY_AGENT_SOCKET="${COPILOT_SSH_AUTH_SOCK:-${SSH_AUTH_SOCK:-}}"
+        E2E_AGENT_KEYS=()
+        if [[ -n "$E2E_KEY_AGENT_SOCKET" && -S "$E2E_KEY_AGENT_SOCKET" ]] &&
+            command -v ssh-add >/dev/null 2>&1; then
+            while IFS= read -r E2E_AGENT_KEY; do
+                case "$E2E_AGENT_KEY" in
+                    ssh-*|ecdsa-*|sk-*)
+                        E2E_AGENT_KEYS+=("$E2E_AGENT_KEY")
+                        ;;
+                esac
+            done < <(SSH_AUTH_SOCK="$E2E_KEY_AGENT_SOCKET" ssh-add -L 2>/dev/null || true)
+        fi
+        if [[ "${#E2E_AGENT_KEYS[@]}" -eq 1 ]]; then
+            AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE="$COPILOT_HOME/e2e-ssh-public-key"
+            printf '%s\n' "${E2E_AGENT_KEYS[0]}" >"$AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE"
+            chmod 644 "$AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE"
+        fi
+    fi
+    if [[ -n "$AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE" ]]; then
+        E2E_SSH_PUBLIC_KEY_PARENT_ARGS=(--dir "$HOME/.ssh")
+        E2E_SSH_PUBLIC_KEY_BIND_ARGS=(
+            --ro-bind "$AUTHD_E2E_SSH_PUBLIC_KEY_SOURCE" "$AUTHD_E2E_SSH_PUBLIC_KEY"
+        )
+    else
+        echo "warning: authd E2E SSH public key not found: $AUTHD_E2E_SSH_PUBLIC_KEY" >&2
+        echo "warning: provisioning will require that file or exactly one loaded ssh-agent key" >&2
+    fi
+fi
 
 # Keep the Secret Service database separate from the host keyring.
 KEYRING_DATA_HOME="$COPILOT_HOME/keyring-data"
@@ -290,6 +423,13 @@ if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
     WAYLAND_SOCKET_BIND_ARGS=(--bind "$WAYLAND_SOCKET" "$WAYLAND_SOCKET_TARGET")
 fi
 
+# Expose the X11 socket directory for recorders and X11-based tools without
+# exposing the rest of the host's /tmp.
+X11_SOCKET_BIND_ARGS=(--dir /tmp/.X11-unix)
+if [[ -n "${DISPLAY:-}" && -d /tmp/.X11-unix ]]; then
+    X11_SOCKET_BIND_ARGS+=(--bind /tmp/.X11-unix /tmp/.X11-unix)
+fi
+
 # dbus-daemon requires a passwd and group entry for the sandboxed UID. The
 # host's NSS configuration provides those entries, but they are not always in
 # /etc/passwd and /etc/group.
@@ -380,14 +520,93 @@ fi
 if [[ "$SSH_AGENT_ENABLED" == true ]]; then
     SANDBOX_ENV_ARGS+=(--setenv SSH_AUTH_SOCK /tmp/copilot-runtime/ssh-agent)
 fi
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+    SANDBOX_ENV_ARGS+=(--setenv COPILOT_E2E_SUDO_SOCKET "$E2E_SUDO_SOCKET")
+fi
 
-# Expose only read-only libvirt metadata, including VM vsock CIDs.
+# Expose read-only libvirt metadata by default. VM lifecycle operations such as
+# snapshot-revert require the writable management socket, so make that access
+# an explicit opt-in rather than silently widening the sandbox's privileges.
+LIBVIRT_BIND_ARGS=(--bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock)
+AUTHD_E2E_DATA_BIND_ARGS=()
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+    if [[ ! -S /var/run/libvirt/libvirt-sock ]]; then
+        echo "error: writable libvirt socket not found: /var/run/libvirt/libvirt-sock" >&2
+        exit 1
+    fi
+    AUTHD_E2E_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/authd-e2e-tests"
+    if [[ ! -d "$AUTHD_E2E_DATA_DIR" ]]; then
+        echo "error: authd E2E data directory not found: $AUTHD_E2E_DATA_DIR" >&2
+        exit 1
+    fi
+    AUTHD_E2E_DATA_DIR="$(realpath "$AUTHD_E2E_DATA_DIR")"
+    LIBVIRT_BIND_ARGS=(--bind /var/run/libvirt/libvirt-sock /var/run/libvirt/libvirt-sock)
+    AUTHD_E2E_DATA_BIND_ARGS=(--bind "$AUTHD_E2E_DATA_DIR" "$AUTHD_E2E_DATA_DIR")
+    SANDBOX_ENV_ARGS+=(--setenv LIBVIRT_DEFAULT_URI qemu:///system)
+    E2E_SUDO_ALLOWED_IMAGE_ROOTS=(
+        "$PROJECTS_DIR"
+        "$COPILOT_HOME"
+        "$AUTHD_E2E_DATA_DIR"
+    )
+fi
+
+VSOCK_DEVICE_BIND_ARGS=()
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+    if [[ ! -c /dev/vsock ]] && command -v modprobe >/dev/null 2>&1; then
+        sudo modprobe vhost_vsock 2>/dev/null ||
+            sudo modprobe vsock 2>/dev/null || true
+    fi
+    if [[ ! -c /dev/vsock ]]; then
+        VSOCK_MINOR="$(awk '$2 == "vsock" { print $1; exit }' /proc/misc 2>/dev/null || true)"
+        if [[ "$VSOCK_MINOR" =~ ^[0-9]+$ ]]; then
+            sudo mknod -m 0666 /dev/vsock c 10 "$VSOCK_MINOR" 2>/dev/null || true
+        fi
+    fi
+    if [[ ! -c /dev/vsock ]]; then
+        echo "error: host vsock device is unavailable: /dev/vsock" >&2
+        exit 1
+    fi
+    VSOCK_DEVICE_BIND_ARGS=(--dev-bind /dev/vsock /dev/vsock)
+fi
+
+cleanup_e2e_sudo_helper() {
+    if [[ -n "$E2E_SUDO_HELPER_PID" ]] &&
+        kill -0 "$E2E_SUDO_HELPER_PID" 2>/dev/null; then
+        kill "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
+        wait "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
+    fi
+}
+
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+    trap cleanup_e2e_sudo_helper EXIT
+    "$SCRIPT_DIR/copilot-e2e-sudo-helper" \
+        "$E2E_SUDO_SOCKET" \
+        "${E2E_SUDO_ALLOWED_IMAGE_ROOTS[@]}" &
+    E2E_SUDO_HELPER_PID=$!
+    E2E_SUDO_HELPER_READY=false
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        if ! kill -0 "$E2E_SUDO_HELPER_PID" 2>/dev/null; then
+            break
+        fi
+        if [[ -S "$E2E_SUDO_SOCKET" ]]; then
+            E2E_SUDO_HELPER_READY=true
+            break
+        fi
+        sleep 0.05
+    done
+    if [[ "$E2E_SUDO_HELPER_READY" != true ]]; then
+        echo "error: could not initialize the host-side E2E sudo helper" >&2
+        wait "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
+        exit 1
+    fi
+fi
+
 # Keep only capabilities needed by the nested OCI runtime; they are scoped to
 # the bwrap user namespace and do not grant host capabilities.
 # Hide the persistent policy directory with a sandbox-only tmpfs. A bwrap
 # --bind source must exist outside the sandbox, so a directory created with
 # --dir under /tmp cannot be used as that source.
-exec bwrap \
+bwrap \
     --unshare-all \
     --share-net \
     --die-with-parent \
@@ -424,9 +643,11 @@ exec bwrap \
     "${GIT_CONFIG_BIND_ARGS[@]}" \
     \
     --dev /dev \
+    "${VSOCK_DEVICE_BIND_ARGS[@]}" \
     --bind /dev/null /dev/log \
     --proc /proc \
     --tmpfs /tmp \
+    "${X11_SOCKET_BIND_ARGS[@]}" \
     --dir /tmp/copilot-runtime \
     --chmod 700 /tmp/copilot-runtime \
     --dir /tmp/copilot-runtime/tmp \
@@ -434,7 +655,7 @@ exec bwrap \
     --dir /sys/fs \
     --dir /sys/fs/cgroup \
     --dir /var/run/libvirt \
-    --bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock \
+    "${LIBVIRT_BIND_ARGS[@]}" \
     "${WAYLAND_SOCKET_BIND_ARGS[@]}" \
     "${SSH_AGENT_BIND_ARGS[@]}" \
     "${SSH_KNOWN_HOSTS_BIND_ARGS[@]}" \
@@ -442,6 +663,10 @@ exec bwrap \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
+    "${E2E_SUDO_CLIENT_BIND_ARGS[@]}" \
+    "${E2E_SSH_PUBLIC_KEY_PARENT_ARGS[@]}" \
+    "${E2E_SSH_PUBLIC_KEY_BIND_ARGS[@]}" \
+    "${AUTHD_E2E_DATA_BIND_ARGS[@]}" \
     --tmpfs "$CONTAINERS_CONFIG_HOME" \
     --ro-bind "$SECRETS_HOME" "$SECRETS_HOME" \
     \

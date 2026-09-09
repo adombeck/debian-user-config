@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import socket
+import struct
+import sys
+import threading
+
+
+def write_all(file_descriptor, data):
+    offset = 0
+    while offset < len(data):
+        offset += os.write(file_descriptor, data[offset:])
+
+
+def forward_stdin(connection):
+    try:
+        while True:
+            data = os.read(0, 65536)
+            if not data:
+                break
+            connection.sendall(data)
+        connection.shutdown(socket.SHUT_WR)
+    except (BrokenPipeError, OSError):
+        pass
+
+
+def main():
+    socket_path = os.environ.get("COPILOT_E2E_SUDO_SOCKET")
+    if not socket_path:
+        print("error: COPILOT_E2E_SUDO_SOCKET is not set", file=sys.stderr)
+        return 125
+
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        connection.connect(socket_path)
+        request = json.dumps(sys.argv[1:]).encode()
+        connection.sendall(struct.pack("!I", len(request)) + request)
+
+        input_thread = threading.Thread(target=forward_stdin, args=(connection,), daemon=True)
+        input_thread.start()
+
+        buffer = bytearray()
+        exit_code = 125
+        while True:
+            data = connection.recv(65536)
+            if not data:
+                break
+            buffer.extend(data)
+            while len(buffer) >= 5:
+                frame_type = bytes(buffer[:1])
+                frame_size = struct.unpack("!I", buffer[1:5])[0]
+                if len(buffer) < 5 + frame_size:
+                    break
+                payload = bytes(buffer[5 : 5 + frame_size])
+                del buffer[: 5 + frame_size]
+                if frame_type == b"O":
+                    write_all(1, payload)
+                elif frame_type == b"E":
+                    write_all(2, payload)
+                elif frame_type == b"S":
+                    if len(payload) != 4:
+                        print("error: invalid sudo helper status", file=sys.stderr)
+                        return 125
+                    exit_code = struct.unpack("!i", payload)[0]
+                    return exit_code
+                else:
+                    print("error: unknown sudo helper response", file=sys.stderr)
+                    return 125
+    except (ConnectionError, OSError) as error:
+        print(f"error: could not connect to e2e sudo helper: {error}", file=sys.stderr)
+        return 125
+    finally:
+        connection.close()
+
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

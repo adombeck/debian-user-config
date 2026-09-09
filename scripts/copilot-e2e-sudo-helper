@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import selectors
+import shlex
+import signal
+import socket
+import stat
+import struct
+import subprocess
+import sys
+
+
+MAX_REQUEST_SIZE = 1024 * 1024
+STATUS_FRAME = b"S"
+STDERR_FRAME = b"E"
+STDOUT_FRAME = b"O"
+
+ALLOWED_GUESTFISH_OPERATIONS = {
+    ("stat", "/var/lib/cloud/instance/boot-finished"),
+    ("cat", "/var/lib/cloud/data/result.json"),
+}
+
+
+def receive_exact(connection, size):
+    data = bytearray()
+    while len(data) < size:
+        chunk = connection.recv(size - len(data))
+        if not chunk:
+            raise ConnectionError("sudo client disconnected")
+        data.extend(chunk)
+    return bytes(data)
+
+
+def send_frame(connection, frame_type, payload):
+    connection.sendall(frame_type + struct.pack("!I", len(payload)) + payload)
+
+
+def close_stdin(process):
+    try:
+        process.stdin.close()
+    except BrokenPipeError:
+        pass
+
+
+def path_is_within(path, root):
+    try:
+        return os.path.commonpath((path, root)) == root
+    except ValueError:
+        return False
+
+
+def validate_request(request, allowed_image_roots):
+    if (
+        len(request) == 7
+        and request[0] == "guestfish"
+        and request[1:3] == ["--ro", "-a"]
+        and request[4] == "-i"
+        and tuple(request[5:]) in ALLOWED_GUESTFISH_OPERATIONS
+    ):
+        image_path = os.path.realpath(request[3])
+        if (
+            image_path.endswith(".qcow2")
+            and os.path.isfile(image_path)
+            and any(path_is_within(image_path, root) for root in allowed_image_roots)
+        ):
+            return
+
+    raise ValueError(f"sudo command is not allowlisted: {shlex.join(request)}")
+
+
+def run_request(connection, allowed_image_roots):
+    request_size = struct.unpack("!I", receive_exact(connection, 4))[0]
+    if request_size > MAX_REQUEST_SIZE:
+        raise ValueError("sudo request is too large")
+
+    request = json.loads(receive_exact(connection, request_size))
+    if not isinstance(request, list) or not all(isinstance(arg, str) for arg in request):
+        raise ValueError("sudo request must be a list of strings")
+    validate_request(request, allowed_image_roots)
+
+    process = subprocess.Popen(
+        ["sudo", "-n", *request],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    selector = selectors.DefaultSelector()
+    connection.setblocking(False)
+    selector.register(connection, selectors.EVENT_READ, ("client", None))
+    streams = {
+        process.stdout.fileno(): (process.stdout, STDOUT_FRAME),
+        process.stderr.fileno(): (process.stderr, STDERR_FRAME),
+    }
+    for stream, frame_type in streams.values():
+        os.set_blocking(stream.fileno(), False)
+        selector.register(stream, selectors.EVENT_READ, ("output", frame_type))
+
+    stdin_open = True
+    try:
+        while streams:
+            for key, _ in selector.select():
+                kind, value = key.data
+                if kind == "client":
+                    data = connection.recv(65536)
+                    if data and stdin_open:
+                        try:
+                            process.stdin.write(data)
+                            process.stdin.flush()
+                        except (BrokenPipeError, ValueError):
+                            close_stdin(process)
+                            stdin_open = False
+                    elif not data and stdin_open:
+                        close_stdin(process)
+                        stdin_open = False
+                        selector.unregister(connection)
+                else:
+                    data = os.read(key.fd, 65536)
+                    if data:
+                        send_frame(connection, value, data)
+                    else:
+                        selector.unregister(key.fileobj)
+                        streams.pop(key.fd, None)
+
+            if process.poll() is not None and stdin_open:
+                close_stdin(process)
+                stdin_open = False
+                selector.unregister(connection)
+
+        send_frame(connection, STATUS_FRAME, struct.pack("!i", process.wait()))
+    finally:
+        selector.close()
+        if stdin_open:
+            close_stdin(process)
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+        process.stdout.close()
+        process.stderr.close()
+
+
+def main():
+    if len(sys.argv) < 3:
+        print(f"usage: {sys.argv[0]} SOCKET ALLOWED_IMAGE_ROOT [...]", file=sys.stderr)
+        return 2
+
+    socket_path = sys.argv[1]
+    allowed_image_roots = []
+    for root in sys.argv[2:]:
+        if not os.path.isdir(root):
+            print(f"error: allowed image root is not a directory: {root}", file=sys.stderr)
+            return 1
+        allowed_image_roots.append(os.path.realpath(root))
+
+    if os.path.lexists(socket_path):
+        if not stat_is_socket(socket_path):
+            print(f"error: refusing to replace non-socket path: {socket_path}", file=sys.stderr)
+            return 1
+        os.unlink(socket_path)
+
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(socket_path)
+    os.chmod(socket_path, 0o600)
+    server.listen(1)
+
+    def stop(_signum, _frame):
+        raise SystemExit
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        while True:
+            connection, _ = server.accept()
+            with connection:
+                try:
+                    run_request(connection, allowed_image_roots)
+                except (BrokenPipeError, ConnectionError):
+                    pass
+                except Exception as error:
+                    try:
+                        message = f"copilot e2e sudo helper: {error}\n".encode()
+                        send_frame(connection, STDERR_FRAME, message)
+                        send_frame(connection, STATUS_FRAME, struct.pack("!i", 125))
+                    except (BrokenPipeError, ConnectionError):
+                        pass
+    finally:
+        server.close()
+        if os.path.lexists(socket_path) and stat_is_socket(socket_path):
+            os.unlink(socket_path)
+
+
+def stat_is_socket(path):
+    return os.path.exists(path) and stat.S_ISSOCK(os.stat(path).st_mode)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
