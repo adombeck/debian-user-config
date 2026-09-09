@@ -408,8 +408,8 @@ exec bwrap \
     --ro-bind /lib /lib \
     --ro-bind-try /lib64 /lib64 \
     --ro-bind-try /snap /snap \
-    "${UV_HOST_PYTHON_BIND_ARGS[@]}" \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
+    "${UV_HOST_PYTHON_BIND_ARGS[@]}" \
     "${PODMAN_BIND_ARGS[@]}" \
     --ro-bind-try "${HOME}/go/bin" "${HOME}/go/bin" \
     --ro-bind-try /etc/alternatives /etc/alternatives \
