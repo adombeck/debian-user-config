@@ -126,6 +126,13 @@ if command -v podman >/dev/null 2>&1; then
     SANDBOX_PATH="$PODMAN_BIN_DIR:$SANDBOX_PATH"
 fi
 
+# A snap launcher needs snapd, which is intentionally not exposed in the
+# sandbox. Use the uv payload directly when uv is installed from its snap.
+UV_COMMAND="$(command -v uv 2>/dev/null || true)"
+if [[ "$UV_COMMAND" == /snap/bin/uv && -x /snap/astral-uv/current/bin/uv ]]; then
+    SANDBOX_PATH="/snap/astral-uv/current/bin:$SANDBOX_PATH"
+fi
+
 # Build bind args for Copilot's own state, creating it first so bwrap has
 # something to bind (bwrap --bind requires the source to exist).
 mkdir -p "$COPILOT_HOME"
@@ -181,6 +188,27 @@ elif [[ -e "$PODMAN_STORAGE_HOME" && ! -d "$PODMAN_STORAGE_HOME" ]]; then
 fi
 mkdir -p "$PODMAN_STORAGE_HOME"
 chmod 700 "$PODMAN_STORAGE_HOME"
+
+# Keep uv-managed Python installations separate from the keyring database and
+# available to virtual environments created inside the sandbox.
+UV_PYTHON_HOME="$COPILOT_HOME/uv-python"
+if [[ -L "$UV_PYTHON_HOME" ]]; then
+    echo "error: refusing to use symlinked uv Python storage: $UV_PYTHON_HOME" >&2
+    exit 1
+elif [[ -e "$UV_PYTHON_HOME" && ! -d "$UV_PYTHON_HOME" ]]; then
+    echo "error: uv Python storage path is not a directory: $UV_PYTHON_HOME" >&2
+    exit 1
+fi
+mkdir -p "$UV_PYTHON_HOME"
+chmod 700 "$UV_PYTHON_HOME"
+
+# Existing virtual environments may point at a host-managed uv interpreter.
+UV_HOST_PYTHON_BIND_ARGS=()
+if [[ -d "$HOME/.local/share/uv/python" ]]; then
+    UV_HOST_PYTHON_BIND_ARGS=(
+        --ro-bind "$HOME/.local/share/uv/python" "$HOME/.local/share/uv/python"
+    )
+fi
 
 # Expose Git's global configuration at its normal path as a read-only
 # snapshot. Reading through a file descriptor also supports symlinked dotfile
@@ -310,6 +338,7 @@ SANDBOX_ENV_ARGS=(
     --setenv XDG_RUNTIME_DIR /tmp/copilot-runtime
     --setenv CONTAINERS_CONF /tmp/copilot-runtime/containers.conf
     --setenv CONTAINERS_STORAGE_CONF /tmp/copilot-runtime/storage.conf
+    --setenv UV_PYTHON_INSTALL_DIR "$UV_PYTHON_HOME"
     --setenv TMPDIR /tmp/copilot-runtime/tmp
     --setenv _CONTAINERS_USERNS_CONFIGURED "done"
     --setenv _CONTAINERS_ROOTLESS_UID "$USER_ID"
@@ -379,6 +408,7 @@ exec bwrap \
     --ro-bind /lib /lib \
     --ro-bind-try /lib64 /lib64 \
     --ro-bind-try /snap /snap \
+    "${UV_HOST_PYTHON_BIND_ARGS[@]}" \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
     "${PODMAN_BIND_ARGS[@]}" \
     --ro-bind-try "${HOME}/go/bin" "${HOME}/go/bin" \
