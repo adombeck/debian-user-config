@@ -8,6 +8,12 @@
 # GitHub; narrow this further with a network namespace + proxy if you want a
 # domain allowlist too.
 #
+# Rootless Podman may be used inside the sandbox with private storage. Host
+# Podman sockets and host container storage are never exposed.
+#
+# On Ubuntu systems with bwrap-userns-restrict, install the scoped AppArmor
+# transition once with: ./apparmor/install.sh
+#
 # Copilot runs with a private D-Bus session and GNOME Keyring. Only its
 # dedicated keyring data under COPILOT_HOME is persisted; the host session bus,
 # keyring, and credential-agent sockets are not exposed.
@@ -80,6 +86,46 @@ if [[ ! -x "$COPILOT_BIN" ]]; then
     exit 1
 fi
 
+# Stage a private, read-only Podman executable at the path covered by the
+# optional per-launcher AppArmor profile. The host copy is updated before
+# entering bwrap; the sandbox only sees the read-only bind.
+PODMAN_BIN_DIR="$HOME/.local/libexec/debian-user-config"
+PODMAN_BIN="$PODMAN_BIN_DIR/copilot-podman"
+PODMAN_BIND_ARGS=()
+SANDBOX_PATH="$PATH"
+if command -v podman >/dev/null 2>&1; then
+    PODMAN_SOURCE="$(command -v podman)"
+    if [[ "$PODMAN_SOURCE" != /* || ! -f "$PODMAN_SOURCE" || ! -x "$PODMAN_SOURCE" ]]; then
+        echo "error: Podman executable is not a regular executable file: $PODMAN_SOURCE" >&2
+        exit 1
+    fi
+    PODMAN_SOURCE="$(realpath "$PODMAN_SOURCE")"
+    if [[ -L "$PODMAN_BIN_DIR" ]]; then
+        echo "error: refusing to use symlinked Podman launcher directory: $PODMAN_BIN_DIR" >&2
+        exit 1
+    fi
+    mkdir -p "$PODMAN_BIN_DIR"
+    chmod 700 "$PODMAN_BIN_DIR"
+    if [[ -L "$PODMAN_BIN" ]]; then
+        echo "error: refusing to use symlinked Podman launcher: $PODMAN_BIN" >&2
+        exit 1
+    elif [[ -e "$PODMAN_BIN" && ! -f "$PODMAN_BIN" ]]; then
+        echo "error: Podman launcher path is not a regular file: $PODMAN_BIN" >&2
+        exit 1
+    fi
+    if [[ "$PODMAN_SOURCE" != "$PODMAN_BIN" ]] &&
+        { [[ ! -e "$PODMAN_BIN" ]] || ! cmp -s "$PODMAN_SOURCE" "$PODMAN_BIN"; }; then
+        PODMAN_TEMP="$(mktemp "$PODMAN_BIN_DIR/.copilot-podman.XXXXXX")"
+        cp "$PODMAN_SOURCE" "$PODMAN_TEMP"
+        chmod 755 "$PODMAN_TEMP"
+        mv -f "$PODMAN_TEMP" "$PODMAN_BIN"
+    fi
+    PODMAN_BIN_DIR="$(realpath "$PODMAN_BIN_DIR")"
+    PODMAN_BIN="$(realpath "$PODMAN_BIN")"
+    PODMAN_BIND_ARGS=(--ro-bind "$PODMAN_BIN_DIR" "$PODMAN_BIN_DIR")
+    SANDBOX_PATH="$PODMAN_BIN_DIR:$SANDBOX_PATH"
+fi
+
 # Build bind args for Copilot's own state, creating it first so bwrap has
 # something to bind (bwrap --bind requires the source to exist).
 mkdir -p "$COPILOT_HOME"
@@ -111,6 +157,30 @@ if [[ -L "$GH_CONFIG_HOME" ]]; then
 fi
 mkdir -p "$GH_CONFIG_HOME"
 chmod 700 "$GH_CONFIG_HOME"
+
+# Reserve the container policy mount point. The actual policy is generated in
+# the sandbox tmpfs below so Copilot cannot persistently change host policy.
+CONTAINERS_CONFIG_HOME="$COPILOT_HOME/config/containers"
+if [[ -L "$CONTAINERS_CONFIG_HOME" ]]; then
+    echo "error: refusing to use symlinked container configuration: $CONTAINERS_CONFIG_HOME" >&2
+    exit 1
+fi
+mkdir -p "$CONTAINERS_CONFIG_HOME"
+chmod 700 "$CONTAINERS_CONFIG_HOME"
+
+# Keep rootless Podman storage separate from the keyring and other Copilot
+# state. The storage configuration itself is generated inside the sandbox's
+# private tmpfs below.
+PODMAN_STORAGE_HOME="$COPILOT_HOME/podman-storage"
+if [[ -L "$PODMAN_STORAGE_HOME" ]]; then
+    echo "error: refusing to use symlinked Podman storage: $PODMAN_STORAGE_HOME" >&2
+    exit 1
+elif [[ -e "$PODMAN_STORAGE_HOME" && ! -d "$PODMAN_STORAGE_HOME" ]]; then
+    echo "error: Podman storage path is not a directory: $PODMAN_STORAGE_HOME" >&2
+    exit 1
+fi
+mkdir -p "$PODMAN_STORAGE_HOME"
+chmod 700 "$PODMAN_STORAGE_HOME"
 
 # Expose Git's global configuration at its normal path as a read-only
 # snapshot. Reading through a file descriptor also supports symlinked dotfile
@@ -210,6 +280,23 @@ fi
 exec 9< <(cat /etc/passwd; printf '%s\n' "$CURRENT_USER_ENTRY")
 exec 10< <(cat /etc/group; printf '%s\n' "$CURRENT_GROUP_ENTRY")
 
+# Podman needs a local timezone file during engine initialization. Prefer the
+# host timezone, falling back to UTC on minimal hosts without /etc/localtime.
+LOCALTIME_BIND_ARGS=()
+if [[ -e /etc/localtime ]]; then
+    LOCALTIME_PATH="$(realpath /etc/localtime)"
+    if [[ ! -f "$LOCALTIME_PATH" || ! -r "$LOCALTIME_PATH" ]]; then
+        echo "error: local timezone path is not a readable regular file: $LOCALTIME_PATH" >&2
+        exit 1
+    fi
+    LOCALTIME_BIND_ARGS=(--ro-bind "$LOCALTIME_PATH" /etc/localtime)
+elif [[ -f /usr/share/zoneinfo/UTC ]]; then
+    LOCALTIME_BIND_ARGS=(--ro-bind /usr/share/zoneinfo/UTC /etc/localtime)
+else
+    echo "error: could not find a timezone file for the sandbox" >&2
+    exit 1
+fi
+
 # Authentication uses the private keyring; do not inherit host credentials or
 # agent sockets into the sandbox unless an agent was explicitly selected above.
 SANDBOX_ENV_ARGS=(
@@ -221,7 +308,13 @@ SANDBOX_ENV_ARGS=(
     --setenv XDG_CACHE_HOME "$COPILOT_HOME/cache"
     --setenv GH_CONFIG_DIR "$GH_CONFIG_HOME"
     --setenv XDG_RUNTIME_DIR /tmp/copilot-runtime
-    --setenv PATH "$PATH"
+    --setenv CONTAINERS_CONF /tmp/copilot-runtime/containers.conf
+    --setenv CONTAINERS_STORAGE_CONF /tmp/copilot-runtime/storage.conf
+    --setenv TMPDIR /tmp/copilot-runtime/tmp
+    --setenv _CONTAINERS_USERNS_CONFIGURED "done"
+    --setenv _CONTAINERS_ROOTLESS_UID "$USER_ID"
+    --setenv _CONTAINERS_ROOTLESS_GID "$GROUP_ID"
+    --setenv PATH "$SANDBOX_PATH"
 )
 if [[ -n "${TERM:-}" ]]; then
     SANDBOX_ENV_ARGS+=(--setenv TERM "$TERM")
@@ -260,11 +353,25 @@ if [[ "$SSH_AGENT_ENABLED" == true ]]; then
 fi
 
 # Expose only read-only libvirt metadata, including VM vsock CIDs.
+# Keep only capabilities needed by the nested OCI runtime; they are scoped to
+# the bwrap user namespace and do not grant host capabilities.
+# Hide the persistent policy directory with a sandbox-only tmpfs. A bwrap
+# --bind source must exist outside the sandbox, so a directory created with
+# --dir under /tmp cannot be used as that source.
 exec bwrap \
     --unshare-all \
     --share-net \
     --die-with-parent \
     --new-session \
+    --uid 0 \
+    --gid 0 \
+    --cap-add CAP_SYS_ADMIN \
+    --cap-add CAP_SYS_CHROOT \
+    --cap-add CAP_NET_ADMIN \
+    --cap-add CAP_SETUID \
+    --cap-add CAP_SETGID \
+    --cap-add CAP_SETPCAP \
+    --cap-add CAP_MKNOD \
     "${SANDBOX_ENV_ARGS[@]}" \
     \
     --ro-bind /usr /usr \
@@ -273,12 +380,14 @@ exec bwrap \
     --ro-bind-try /lib64 /lib64 \
     --ro-bind-try /snap /snap \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
+    "${PODMAN_BIND_ARGS[@]}" \
     --ro-bind-try "${HOME}/go/bin" "${HOME}/go/bin" \
     --ro-bind-try /etc/alternatives /etc/alternatives \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
     --ro-bind /etc/ssl /etc/ssl \
     --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf \
     --ro-bind /etc/hosts /etc/hosts \
+    "${LOCALTIME_BIND_ARGS[@]}" \
     --ro-bind-data 9 /etc/passwd \
     --ro-bind-data 10 /etc/group \
     --ro-bind "$COPILOT_BIN" "$COPILOT_BIN" \
@@ -290,6 +399,10 @@ exec bwrap \
     --tmpfs /tmp \
     --dir /tmp/copilot-runtime \
     --chmod 700 /tmp/copilot-runtime \
+    --dir /tmp/copilot-runtime/tmp \
+    --dir /sys \
+    --dir /sys/fs \
+    --dir /sys/fs/cgroup \
     --dir /var/run/libvirt \
     --bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock \
     "${WAYLAND_SOCKET_BIND_ARGS[@]}" \
@@ -299,6 +412,7 @@ exec bwrap \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
+    --tmpfs "$CONTAINERS_CONFIG_HOME" \
     --ro-bind "$SECRETS_HOME" "$SECRETS_HOME" \
     \
     --chdir "$WORKDIR" \
@@ -375,6 +489,38 @@ exec bwrap \
             /usr/bin/cat /tmp/copilot-keyring-daemon.err >&2
             exit 1
         fi
+
+        # Keep containers in the bwrap user namespace without requiring
+        # subordinate UID/GID mappings, host cgroups, or /dev/fuse.
+        /usr/bin/mkdir -p "$XDG_RUNTIME_DIR/podman"
+        printf "%s\n" \
+            "[containers]" \
+            "userns = \"host\"" \
+            "cgroups = \"disabled\"" \
+            "" \
+            "[engine]" \
+            "cgroup_manager = \"cgroupfs\"" \
+            "remote = false" \
+            >/tmp/copilot-runtime/containers.conf
+        printf "%s\n" \
+            "[storage]" \
+            "driver = \"vfs\"" \
+            "rootless_storage_path = \"\$COPILOT_HOME/podman-storage\"" \
+            "runroot = \"\$XDG_RUNTIME_DIR/podman\"" \
+            "" \
+            "[storage.options.vfs]" \
+            "ignore_chown_errors = \"true\"" \
+            >/tmp/copilot-runtime/storage.conf
+        printf "%s\n" \
+            "{" \
+            "  \"default\": [{\"type\": \"reject\"}]," \
+            "  \"transports\": {" \
+            "    \"docker\": {" \
+            "      \"docker.io\": [{\"type\": \"insecureAcceptAnything\"}]" \
+            "    }" \
+            "  }" \
+            "}" \
+            >"$COPILOT_HOME/config/containers/policy.json"
 
         github_token_file="$COPILOT_HOME/secrets/github-token"
         if [[ -e "$github_token_file" || -L "$github_token_file" ]]; then
