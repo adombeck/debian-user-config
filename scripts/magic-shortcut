@@ -140,6 +140,7 @@ def notify_claim_result(result, clipboard_content):
     match = JIRA_ISSUE_REGEX.search(result.stdout)
     if match:
         issue_key = match.group(0)
+        subprocess.run(["wl-copy", issue_key], check=True)
         notify("Jira issue claimed", issue_key,
                copy_text=issue_key, copy_label=f"Copy {issue_key}")
     else:
