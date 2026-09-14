@@ -808,6 +808,20 @@ bwrap \
             export GH_TOKEN
         fi
 
+        jira_token_file="$COPILOT_HOME/secrets/jira-token"
+        if [[ -e "$jira_token_file" || -L "$jira_token_file" ]]; then
+            if [[ ! -f "$jira_token_file" || ! -r "$jira_token_file" ]]; then
+                echo "error: Jira token file is not a readable regular file: $jira_token_file" >&2
+                exit 1
+            fi
+            JIRA_API_TOKEN="$(<"$jira_token_file")"
+            if [[ -z "$JIRA_API_TOKEN" ]]; then
+                echo "error: Jira token file is empty: $jira_token_file" >&2
+                exit 1
+            fi
+            export JIRA_API_TOKEN
+        fi
+
         if "$@"; then
             status=0
         else
