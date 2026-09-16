@@ -530,7 +530,21 @@ fi
 LIBVIRT_BIND_ARGS=(--bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock)
 AUTHD_E2E_DATA_BIND_ARGS=()
 
-# Expose E2E artifacts downloaded from CI
+# Expose artifacts downloaded from CI.
+AUTHD_ARTIFACTS_DIR="$HOME/.local/share/authd-artifacts"
+if [[ -L "$AUTHD_ARTIFACTS_DIR" ]]; then
+    echo "error: refusing to use symlinked authd artifacts directory: $AUTHD_ARTIFACTS_DIR" >&2
+    exit 1
+elif [[ -e "$AUTHD_ARTIFACTS_DIR" && ! -d "$AUTHD_ARTIFACTS_DIR" ]]; then
+    echo "error: authd artifacts path is not a directory: $AUTHD_ARTIFACTS_DIR" >&2
+    exit 1
+fi
+mkdir -p "$AUTHD_ARTIFACTS_DIR"
+AUTHD_ARTIFACTS_DIR="$(realpath "$AUTHD_ARTIFACTS_DIR")"
+AUTHD_ARTIFACTS_BIND_ARGS=(
+    --bind "$AUTHD_ARTIFACTS_DIR" "$AUTHD_ARTIFACTS_DIR"
+)
+
 AUTHD_E2E_ARTIFACTS_DIR="$HOME/.local/share/authd-e2e-artifacts"
 if [[ -L "$AUTHD_E2E_ARTIFACTS_DIR" ]]; then
     echo "error: refusing to use symlinked authd E2E artifacts directory: $AUTHD_E2E_ARTIFACTS_DIR" >&2
@@ -544,6 +558,8 @@ AUTHD_E2E_ARTIFACTS_DIR="$(realpath "$AUTHD_E2E_ARTIFACTS_DIR")"
 AUTHD_E2E_ARTIFACTS_BIND_ARGS=(
     --bind "$AUTHD_E2E_ARTIFACTS_DIR" "$AUTHD_E2E_ARTIFACTS_DIR"
 )
+SANDBOX_ENV_ARGS+=(--setenv AUTHD_ARTIFACTS_DIR "$AUTHD_ARTIFACTS_DIR")
+SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_ARTIFACTS_DIR "$AUTHD_E2E_ARTIFACTS_DIR")
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     if [[ ! -S /var/run/libvirt/libvirt-sock ]]; then
@@ -683,6 +699,7 @@ bwrap \
     "${E2E_SSH_PUBLIC_KEY_PARENT_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_BIND_ARGS[@]}" \
     "${AUTHD_E2E_DATA_BIND_ARGS[@]}" \
+    "${AUTHD_ARTIFACTS_BIND_ARGS[@]}" \
     "${AUTHD_E2E_ARTIFACTS_BIND_ARGS[@]}" \
     --tmpfs "$CONTAINERS_CONFIG_HOME" \
     --ro-bind "$SECRETS_HOME" "$SECRETS_HOME" \
