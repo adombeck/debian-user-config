@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import gi
+
+gi.require_version('Notify', '0.7')
+from gi.repository import GLib, Notify
+
+# This file is shared by all the scripts I use which display notifications,
+# so that they replace each other's notifications.
+NOTIFICATION_ID_FILE = Path(f"/run/user/{os.getuid()}/notification-id")
+
+PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+).*')
+GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
+JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
+AUTHD_E2E_TEST_HTML_REGEX = re.compile(
+    rf'(?:/run/user/\d+/authd-e2e-test-runs|'
+    rf'{re.escape(str(Path.home() / ".local/share/authd-e2e-artifacts"))})/.*\.html')
+GITHUB_RUN_ID_REGEX = re.compile(r'run-\d+')
+GITHUB_RUN_URL = "https://github.com/canonical/authd/actions/runs/"
+GITHUB_AUTHD_CI_JOB_URL_REGEX = re.compile(
+    r'https://github\.com/canonical/authd/actions/runs/\d+/job/\d+(?:\?.*)?')
+GITHUB_CANONICAL_ISSUE_REGEX = re.compile(r'https://github\.com/canonical/[^/]+/issues/\d+')
+JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d+')
+JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
+JIRA_CREATE_AND_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-create-and-claim-issue").expanduser()
+FIX_ISSUE_SCRIPT = Path("~/projects/authd-scripts/fix-issue").expanduser()
+DEBUG_CI_JOB_SCRIPT = Path("~/projects/authd-scripts/debug-ci-job").expanduser()
+GITHUB_REVIEW_COMMENT_URL_REGEX = re.compile(
+    r'https://github\.com/[^/]+/[^/]+/pull/\d+#(discussion_r\d+|issuecomment-\d+)')
+ADDRESS_REVIEW_COMMENT_SCRIPT = Path("~/projects/authd-scripts/address-review-comment").expanduser()
+
+AUTHD_REPO = Path("~/projects/authd").expanduser()
+GUAKE_DBUS_DEST = "org.guake3.RemoteControl"
+GUAKE_DBUS_OBJECT = "/org/guake3/RemoteControl"
+GUAKE_DBUS_IFACE = "org.guake3.RemoteControl"
+
+# Add $HOME/.local/bin to the PATH
+os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
+
+ALT = len(sys.argv) > 1 and sys.argv[1] == "--alt"
+
+class Editor:
+    def open(self, path, line_number=None):
+        raise NotImplementedError
+
+
+def raise_intellij_project(project_dir):
+    subprocess.Popen(
+        ["gdbus", "call", "--session",
+         "--dest", "org.gnome.Shell",
+         "--object-path", "/de/lucaswerkmeister/ActivateWindowByTitle",
+         "--method", "de.lucaswerkmeister.ActivateWindowByTitle.activateBySubstring",
+         f"[{project_dir}]".replace(str(Path.home()), "~")],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+class IntelliJ(Editor):
+    def open(self, path, project_dir=None, line_number=None):
+        command = ["idea"]
+        real_path = Path(path)
+
+        if not real_path.exists():
+            notify("File not found", str(path))
+            return
+
+        if project_dir:
+            command += [str(project_dir)]
+            raise_intellij_project(project_dir)
+
+        if line_number:
+            command += ['--line', str(line_number)]
+
+        command += [str(real_path)]
+
+        notify("Opening file in IntelliJ", str(real_path))
+
+        print(f"Command: {' '.join(command)}", file=sys.stderr)
+        subprocess.run(command)
+
+
+EDITOR = IntelliJ()
+
+
+def notify(title, body, copy_text=None, copy_label="Copy"):
+    if NOTIFICATION_ID_FILE.exists():
+        id_ = int(NOTIFICATION_ID_FILE.read_text().strip())
+    else:
+        id_ = 0
+
+    notification = Notify.Notification(
+        summary=title,
+        body=body,
+        id=id_,
+    )
+
+    # If copy_text is provided, add an action button that copies it to the
+    # clipboard when clicked. This requires a GLib main loop to be running so
+    # that the action callback can fire.
+    loop = None
+    if copy_text is not None:
+        loop = GLib.MainLoop()
+        # Explicitly mark as non-transient so the notification persists in the
+        # notification list/tray and isn't treated as a popup-only notification.
+        notification.set_hint("transient", GLib.Variant("b", False))
+
+        def on_copy(_notification, _action, *_args):
+            subprocess.run(["wl-copy", copy_text])
+            loop.quit()
+
+        # "default" fires when the notification body itself is clicked (no need
+        # to hover to reveal the button), "copy" is the explicit action button.
+        notification.add_action("default", copy_label, on_copy)
+        notification.add_action("copy", copy_label, on_copy)
+        notification.connect("closed", lambda _notification: loop.quit())
+
+    try:
+        notification.show()
+    except gi.repository.GLib.Error as e:
+        if "Invalid notification ID" in str(e):
+            # Delete the notification file and try again
+            NOTIFICATION_ID_FILE.unlink()
+            notify(title, body, copy_text=copy_text, copy_label=copy_label)
+            return
+        raise
+
+    Path(NOTIFICATION_ID_FILE).write_text(str(notification.props.id))
+
+    if loop is not None:
+        # Keep the main loop running so the action button works, but don't hang
+        # forever if the user never interacts with the notification.
+        GLib.timeout_add_seconds(60, loop.quit)
+        loop.run()
+
+
+def notify_claim_result(result, clipboard_content):
+    if result.returncode != 0:
+        notify("Failed to claim Jira issue", result.stderr.strip() or clipboard_content)
+        return
+
+    match = JIRA_ISSUE_REGEX.search(result.stdout)
+    if match:
+        issue_key = match.group(0)
+        subprocess.run(["wl-copy", issue_key], check=True)
+        notify("Jira issue claimed", issue_key,
+               copy_text=issue_key, copy_label=f"Copy {issue_key}")
+    else:
+        notify("Jira issue claimed", clipboard_content)
+
+
+def main():
+    Notify.init("local.magic-shortcut")
+
+    path, line_number = None, None
+
+    # Get the clipboard content via wl-clipboard (this assumes Wayland)
+    clipboard_content = subprocess.run(
+        ["wl-paste"],
+        stdout=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+
+    if not clipboard_content:
+        # Show a notification if the clipboard is empty
+        notify("Clipboard is empty", "Nothing to do")
+        return
+
+    # If the clipboard content is a path to an authd e2e-test HTML log file,
+    # open it with google-chrome
+    if AUTHD_E2E_TEST_HTML_REGEX.match(clipboard_content):
+        notify("Opening authd e2e-test log in google-chrome", clipboard_content)
+        subprocess.run(["google-chrome", clipboard_content])
+        return
+
+    if GITHUB_RUN_ID_REGEX.match(clipboard_content):
+        url = GITHUB_RUN_URL + clipboard_content.removeprefix("run-")
+        notify("Opening GitHub Actions run in browser", url)
+        # If the default browser is Firefox, we can use `firefox --new-window`
+        # to open the URL in a new window. Otherwise, we just use `xdg-open`.
+        default_web_browser = subprocess.check_output(
+            ["xdg-settings", "get", "default-web-browser"], text=True).strip()
+        if "firefox" in default_web_browser.lower():
+            subprocess.run(["firefox", "--new-window", url])
+        else:
+            subprocess.run(["xdg-open", url])
+        return
+
+    # If the clipboard content is an authd GitHub Actions job URL, create a
+    # worktree for its PR and start a Copilot session to debug the failure.
+    if GITHUB_AUTHD_CI_JOB_URL_REGEX.fullmatch(clipboard_content) and DEBUG_CI_JOB_SCRIPT.exists():
+        notify("Debugging authd CI job", clipboard_content)
+        subprocess.Popen([str(DEBUG_CI_JOB_SCRIPT), clipboard_content])
+        return
+
+    # If the clipboard content is a GitHub issue URL for a canonical repo,
+    # call the jira-claim-issue script if it exists, then run fix-issue
+    if GITHUB_CANONICAL_ISSUE_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
+        #notify("Claiming Jira issue", clipboard_content)
+        #result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
+        #                        capture_output=True, text=True)
+        notify("Creating and claiming Jira issue", clipboard_content)
+        result = subprocess.run([str(JIRA_CREATE_AND_CLAIM_ISSUE_SCRIPT), clipboard_content],
+                                capture_output=True, text=True)
+        if FIX_ISSUE_SCRIPT.exists():
+            subprocess.Popen([str(FIX_ISSUE_SCRIPT), clipboard_content])
+        notify_claim_result(result, clipboard_content)
+        return
+
+    # If the clipboard content is a URL to a GitHub PR review comment or a
+    # PR issue comment, call address-review-comment
+    if GITHUB_REVIEW_COMMENT_URL_REGEX.match(clipboard_content) and ADDRESS_REVIEW_COMMENT_SCRIPT.exists():
+        notify("Addressing GitHub review comment", clipboard_content)
+        subprocess.Popen([str(ADDRESS_REVIEW_COMMENT_SCRIPT), clipboard_content])
+        return
+
+    # If the clipboard content is a Jira issue URL, call jira-claim-issue
+    if JIRA_ISSUE_URL_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
+        notify("Claiming Jira issue", clipboard_content)
+        result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
+                                capture_output=True, text=True)
+        notify_claim_result(result, clipboard_content)
+        return
+
+    # If the clipboard content is a URL, open it in the browser
+    if clipboard_content.startswith("http://") or clipboard_content.startswith("https://"):
+        notify("Opening URL in browser", clipboard_content)
+        # If the default browser is Firefox, we can use `firefox --new-window`
+        # to open the URL in a new window. Otherwise, we just use `xdg-open`.
+        default_web_browser = subprocess.check_output(["xdg-settings", "get", "default-web-browser"], text=True).strip()
+        if "firefox" in default_web_browser.lower():
+            subprocess.run(["firefox", "--new-window", clipboard_content])
+        else:
+            subprocess.run(["xdg-open", clipboard_content])
+        return
+
+    # If the clipboard content is a branch name in the authd repo, set up a worktree.
+    # The default shortcut opens it in Guake; the alternate shortcut opens IntelliJ.
+    if AUTHD_REPO.exists():
+        result = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname:short)",
+             f"refs/heads/{clipboard_content}",
+             f"refs/remotes/*/{clipboard_content}"],
+            cwd=AUTHD_REPO,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            worktree_dirname = clipboard_content.replace('/', '-')
+            worktree_path = AUTHD_REPO.parent / f"authd-{worktree_dirname}"
+            notify("Setting up authd worktree", f"Branch: {clipboard_content}")
+            subprocess.run(
+                ["authd-worktree", clipboard_content],
+                cwd=AUTHD_REPO,
+            )
+            if ALT:
+                subprocess.Popen(["idea", str(worktree_path)])
+            else:
+                subprocess.run(
+                    ["gdbus", "call", "--session",
+                     "--dest", GUAKE_DBUS_DEST,
+                     "--object-path", GUAKE_DBUS_OBJECT,
+                     "--method", f"{GUAKE_DBUS_IFACE}.add_tab",
+                     str(worktree_path)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                subprocess.run(
+                    ["gdbus", "call", "--session",
+                     "--dest", GUAKE_DBUS_DEST,
+                     "--object-path", GUAKE_DBUS_OBJECT,
+                     "--method", f"{GUAKE_DBUS_IFACE}.show"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            return
+
+        # If the clipboard content is <remote>:<branch>, fetch the branch and
+        # set up a worktree
+        if clipboard_content.count(':') == 1:
+            remote, branch = clipboard_content.split(':', 1)
+            remotes_result = subprocess.run(
+                ["git", "remote"],
+                cwd=AUTHD_REPO,
+                capture_output=True,
+                text=True,
+            )
+            if remotes_result.returncode == 0 and remote in remotes_result.stdout.splitlines():
+                worktree_dirname = branch.replace('/', '-')
+                worktree_path = AUTHD_REPO.parent / f"authd-{worktree_dirname}"
+                notify("Fetching and setting up authd worktree",
+                       f"Remote: {remote}, Branch: {branch}")
+                fetch_result = subprocess.run(
+                    ["git", "fetch", remote, branch],
+                    cwd=AUTHD_REPO,
+                    capture_output=True,
+                    text=True,
+                )
+                if fetch_result.returncode != 0:
+                    notify("Failed to fetch branch",
+                           fetch_result.stderr.strip() or clipboard_content)
+                    return
+                subprocess.run(
+                    ["authd-worktree", branch],
+                    cwd=AUTHD_REPO,
+                )
+                if ALT:
+                    subprocess.Popen(["idea", str(worktree_path)])
+                else:
+                    subprocess.run(
+                        ["gdbus", "call", "--session",
+                         "--dest", GUAKE_DBUS_DEST,
+                         "--object-path", GUAKE_DBUS_OBJECT,
+                         "--method", f"{GUAKE_DBUS_IFACE}.add_tab",
+                         str(worktree_path)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    subprocess.run(
+                        ["gdbus", "call", "--session",
+                         "--dest", GUAKE_DBUS_DEST,
+                         "--object-path", GUAKE_DBUS_OBJECT,
+                         "--method", f"{GUAKE_DBUS_IFACE}.show"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                return
+
+    # If the clipboard content is a Jira issue key, open the issue in the browser
+    match = JIRA_ISSUE_REGEX.match(clipboard_content)
+    if match:
+        issue_key = match.group(0)
+        print(f"Opening Jira issue {issue_key}", file=sys.stderr)
+        subprocess.run(["xdg-open", f"https://warthogs.atlassian.net/browse/{issue_key}"])
+        return
+
+    # If the clipboard content is a Python stack trace, open the files in IntelliJ
+    match = PYTHON_STACKTRACE_REGEX.match(clipboard_content)
+    if match:
+        path = match.group(1)
+        line_number = match.group(2)
+        print(f"Opening Python stacktrace {path}", file=sys.stderr)
+
+    # If the clipboard content is a git diff, open the files in IntelliJ
+    match = GIT_DIFF_PATH_REGEX.match(clipboard_content)
+    if match:
+        path = match.group(1)
+        print(f"Opening git diff {path}", file=sys.stderr)
+
+    # If the clipboard content is a path to an existing file (optionally
+    # with a line number), open the file in IntelliJ
+    if not path and ':' in clipboard_content:
+        # We want to support both "path/to/file:line_number" and
+        # "path/to/file:line_number:" (the latter is shown by `git diff`),
+        # so we ignore everything after the second colon.
+        parts = clipboard_content.split(':')
+        path, line_number = parts[0], parts[1]
+    elif not path and '#L' in clipboard_content:
+        # Try splitting on '#L' instead
+        parts = clipboard_content.split('#L')
+        path, line_number = parts[0], parts[1]
+    elif not path:
+        path, line_number = clipboard_content, None
+
+    path = Path(path)
+    if path.exists():
+        print(f"Trying {path}", file=sys.stderr)
+        EDITOR.open(path, line_number=line_number)
+        return
+
+    # If the clipboard content is a relative path to an existing file in
+    # a project directory, open the file in IntelliJ
+    if not path.is_absolute():
+        current_project_file = Path("~/.cache/current-intellij-project").expanduser()
+        if current_project_file.exists():
+            current_project = Path(current_project_file.read_text().strip())
+            project_dirs_prefix = [current_project]
+        else:
+            project_dirs_prefix = []
+
+        # Get list of project dirs sorted by modification time, most recent first
+        project_dirs = (p for p in Path("~/projects").expanduser().iterdir())
+        project_dirs = project_dirs_prefix + sorted(project_dirs, key=lambda p: p.stat().st_mtime, reverse=True)
+
+        for project_dir in project_dirs:
+            absolute_path = project_dir / path
+            if absolute_path.exists():
+                print(f"Trying {absolute_path}", file=sys.stderr)
+                EDITOR.open(absolute_path, project_dir=project_dir, line_number=line_number)
+                return
+            # If the path starts with the project directory, remove that part
+            if path.parts[0] == project_dir.name:
+                absolute_path = project_dir / Path(*path.parts[1:])
+                if absolute_path.exists():
+                    print(f"Trying {absolute_path}", file=sys.stderr)
+                    EDITOR.open(absolute_path, project_dir=project_dir, line_number=line_number)
+                    return
+
+    # Show a notification
+    notify("Clipboard content not recognized", clipboard_content)
+
+
+if __name__ == '__main__':
+    main()
