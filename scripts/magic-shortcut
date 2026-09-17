@@ -17,7 +17,9 @@ NOTIFICATION_ID_FILE = Path(f"/run/user/{os.getuid()}/notification-id")
 PYTHON_STACKTRACE_REGEX = re.compile(r'.*File "([^"]+)", line (\d+).*')
 GIT_DIFF_PATH_REGEX = re.compile(r'^[ab]/(.+)$')
 JIRA_ISSUE_REGEX = re.compile(r'[A-Z]+-\d+')
-AUTHD_E2E_TEST_HTML_REGEX = re.compile(r'/run/user/\d+/authd-e2e-test-runs/.*\.html')
+AUTHD_E2E_TEST_HTML_REGEX = re.compile(
+    rf'(?:/run/user/\d+/authd-e2e-test-runs|'
+    rf'{re.escape(str(Path.home() / ".local/share/authd-e2e-artifacts"))})/.*\.html')
 GITHUB_RUN_ID_REGEX = re.compile(r'run-\d+')
 GITHUB_RUN_URL = "https://github.com/canonical/authd/actions/runs/"
 GITHUB_AUTHD_CI_JOB_URL_REGEX = re.compile(
