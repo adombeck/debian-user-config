@@ -27,6 +27,7 @@ GITHUB_AUTHD_CI_JOB_URL_REGEX = re.compile(
 GITHUB_CANONICAL_ISSUE_REGEX = re.compile(r'https://github\.com/canonical/[^/]+/issues/\d+')
 JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d+')
 JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
+JIRA_CREATE_AND_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-create-and-claim-issue").expanduser()
 FIX_ISSUE_SCRIPT = Path("~/projects/authd-scripts/fix-issue").expanduser()
 DEBUG_CI_JOB_SCRIPT = Path("~/projects/authd-scripts/debug-ci-job").expanduser()
 GITHUB_REVIEW_COMMENT_URL_REGEX = re.compile(
@@ -199,8 +200,11 @@ def main():
     # If the clipboard content is a GitHub issue URL for a canonical repo,
     # call the jira-claim-issue script if it exists, then run fix-issue
     if GITHUB_CANONICAL_ISSUE_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
-        notify("Claiming Jira issue", clipboard_content)
-        result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
+        #notify("Claiming Jira issue", clipboard_content)
+        #result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
+        #                        capture_output=True, text=True)
+        notify("Creating and claiming Jira issue", clipboard_content)
+        result = subprocess.run([str(JIRA_CREATE_AND_CLAIM_ISSUE_SCRIPT), clipboard_content],
                                 capture_output=True, text=True)
         if FIX_ISSUE_SCRIPT.exists():
             subprocess.Popen([str(FIX_ISSUE_SCRIPT), clipboard_content])
