@@ -68,11 +68,22 @@ fi
 
 PROJECTS_DIR="${HOME}/projects"
 COPILOT_HOME="${COPILOT_HOME:-${HOME}/.copilot}"
+HOST_CACHE_DIR="${HOME}/.cache"
 
 if [[ ! -d "$PROJECTS_DIR" ]]; then
     echo "error: $PROJECTS_DIR does not exist" >&2
     exit 1
 fi
+
+if [[ -L "$HOST_CACHE_DIR" ]]; then
+    echo "error: refusing to use symlinked host cache directory: $HOST_CACHE_DIR" >&2
+    exit 1
+elif [[ -e "$HOST_CACHE_DIR" && ! -d "$HOST_CACHE_DIR" ]]; then
+    echo "error: host cache path is not a directory: $HOST_CACHE_DIR" >&2
+    exit 1
+fi
+mkdir -p "$HOST_CACHE_DIR"
+HOST_CACHE_DIR="$(realpath "$HOST_CACHE_DIR")"
 
 # Resolve real paths so a symlinked cwd still matches under PROJECTS_DIR.
 PROJECTS_DIR="$(realpath "$PROJECTS_DIR")"
@@ -483,7 +494,7 @@ SANDBOX_ENV_ARGS=(
     --setenv COPILOT_HOME "$COPILOT_HOME"
     --setenv XDG_DATA_HOME "$KEYRING_DATA_HOME"
     --setenv XDG_CONFIG_HOME "$COPILOT_HOME/config"
-    --setenv XDG_CACHE_HOME "$COPILOT_HOME/cache"
+    --setenv XDG_CACHE_HOME "$HOST_CACHE_DIR"
     --setenv GH_CONFIG_DIR "$GH_CONFIG_HOME"
     --setenv XDG_RUNTIME_DIR /tmp/copilot-runtime
     --setenv CONTAINERS_CONF /tmp/copilot-runtime/containers.conf
@@ -715,6 +726,7 @@ bwrap \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
+    --bind "$HOST_CACHE_DIR" "$HOST_CACHE_DIR" \
     "${E2E_SUDO_CLIENT_BIND_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_PARENT_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_BIND_ARGS[@]}" \
