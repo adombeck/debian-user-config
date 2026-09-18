@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "error: the Copilot guestfish helper must run as root" >&2
+    exit 1
+fi
+
+if [[ ! "${SUDO_UID:-}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: could not identify the invoking user" >&2
+    exit 1
+fi
+
+ALLOWED_IMAGE_ROOTS=()
+while [[ "$#" -gt 0 && "$1" != "--" ]]; do
+    ALLOWED_IMAGE_ROOTS+=("$1")
+    shift
+done
+if [[ "$#" -eq 0 ]]; then
+    echo "error: missing guestfish request delimiter" >&2
+    exit 2
+fi
+shift
+
+if [[ "$#" -ne 3 ]]; then
+    echo "error: expected image, operation, and path" >&2
+    exit 2
+fi
+
+IMAGE="$1"
+OPERATION="$2"
+GUESTFISH_PATH="$3"
+
+case "$OPERATION:$GUESTFISH_PATH" in
+    stat:/var/lib/cloud/instance/boot-finished|cat:/var/lib/cloud/data/result.json)
+        ;;
+    *)
+        echo "error: guestfish operation is not allowlisted" >&2
+        exit 1
+        ;;
+esac
+
+if [[ "$IMAGE" != *.qcow2 ]]; then
+    echo "error: guestfish image is not a qcow2 file" >&2
+    exit 1
+fi
+
+IMAGE="$(/usr/bin/realpath -- "$IMAGE")"
+if [[ ! -f "$IMAGE" || "$(/usr/bin/stat -c '%u' -- "$IMAGE")" != "$SUDO_UID" ]]; then
+    echo "error: guestfish image is not a regular file owned by the invoking user" >&2
+    exit 1
+fi
+
+IMAGE_ALLOWED=false
+for root in "${ALLOWED_IMAGE_ROOTS[@]}"; do
+    root="$(/usr/bin/realpath -- "$root")"
+    if [[ ! -d "$root" || "$(/usr/bin/stat -c '%u' -- "$root")" != "$SUDO_UID" ]]; then
+        echo "error: guestfish image root is not a directory owned by the invoking user" >&2
+        exit 1
+    fi
+    if [[ "$IMAGE" == "$root"/* ]]; then
+        IMAGE_ALLOWED=true
+    fi
+done
+
+if [[ "$IMAGE_ALLOWED" != true ]]; then
+    echo "error: guestfish image is outside the allowlisted roots" >&2
+    exit 1
+fi
+
+exec /usr/bin/guestfish --ro -a "$IMAGE" -i "$OPERATION" "$GUESTFISH_PATH"

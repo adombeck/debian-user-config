@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 
+GUESTFISH_HELPER = "/usr/local/libexec/debian-user-config/copilot-e2e-guestfish"
 MAX_REQUEST_SIZE = 1024 * 1024
 STATUS_FRAME = b"S"
 STDERR_FRAME = b"E"
@@ -81,7 +82,16 @@ def run_request(connection, allowed_image_roots):
     validate_request(request, allowed_image_roots)
 
     process = subprocess.Popen(
-        ["sudo", "-n", *request],
+        [
+            "sudo",
+            "-n",
+            GUESTFISH_HELPER,
+            *allowed_image_roots,
+            "--",
+            request[3],
+            request[5],
+            request[6],
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

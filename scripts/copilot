@@ -25,6 +25,9 @@
 # On Ubuntu systems with bwrap-userns-restrict, install the scoped AppArmor
 # transition once with: ./apparmor/install.sh
 #
+# To run --allow-e2e-tests without a sudo password prompt, install the scoped
+# sudo policy and its root-owned helpers once with: ./sudoers/install.sh
+#
 # Copilot runs with a private D-Bus session and GNOME Keyring. Only its
 # dedicated keyring data under COPILOT_HOME is persisted; the host session bus,
 # keyring, and credential-agent sockets are not exposed.
@@ -127,13 +130,19 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         echo "error: sudo is required for --allow-e2e-tests" >&2
         exit 1
     fi
-    if ! sudo -v; then
-        echo "error: could not authenticate sudo for --allow-e2e-tests" >&2
-        exit 1
-    fi
     for helper in copilot-e2e-sudo-helper copilot-e2e-sudo; do
         if [[ ! -x "$SCRIPT_DIR/$helper" ]]; then
             echo "error: E2E helper is missing or not executable: $SCRIPT_DIR/$helper" >&2
+            exit 1
+        fi
+    done
+    for helper in \
+        /usr/local/libexec/debian-user-config/copilot-setup-vsock \
+        /usr/local/libexec/debian-user-config/copilot-e2e-guestfish
+    do
+        if [[ ! -x "$helper" ]]; then
+            echo "error: E2E sudo helper is missing or not executable: $helper" >&2
+            echo "error: install it with ./sudoers/install.sh" >&2
             exit 1
         fi
     done
@@ -584,16 +593,7 @@ fi
 
 VSOCK_DEVICE_BIND_ARGS=()
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    if [[ ! -c /dev/vsock ]] && command -v modprobe >/dev/null 2>&1; then
-        sudo modprobe vhost_vsock 2>/dev/null ||
-            sudo modprobe vsock 2>/dev/null || true
-    fi
-    if [[ ! -c /dev/vsock ]]; then
-        VSOCK_MINOR="$(awk '$2 == "vsock" { print $1; exit }' /proc/misc 2>/dev/null || true)"
-        if [[ "$VSOCK_MINOR" =~ ^[0-9]+$ ]]; then
-            sudo mknod -m 0666 /dev/vsock c 10 "$VSOCK_MINOR" 2>/dev/null || true
-        fi
-    fi
+    sudo -n /usr/local/libexec/debian-user-config/copilot-setup-vsock 2>/dev/null || true
     if [[ ! -c /dev/vsock ]]; then
         echo "error: host vsock device is unavailable: /dev/vsock" >&2
         exit 1

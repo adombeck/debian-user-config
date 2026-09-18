@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "error: the Copilot vsock helper must run as root" >&2
+    exit 1
+fi
+
+if [[ -c /dev/vsock ]]; then
+    exit 0
+fi
+
+if [[ -x /usr/sbin/modprobe ]]; then
+    /usr/sbin/modprobe vhost_vsock 2>/dev/null ||
+        /usr/sbin/modprobe vsock 2>/dev/null ||
+        true
+fi
+
+if [[ ! -c /dev/vsock ]]; then
+    VSOCK_MINOR="$(/usr/bin/awk '$2 == "vsock" { print $1; exit }' /proc/misc 2>/dev/null || true)"
+    if [[ "$VSOCK_MINOR" =~ ^[0-9]+$ ]]; then
+        /usr/bin/mknod -m 0666 /dev/vsock c 10 "$VSOCK_MINOR" 2>/dev/null || true
+    fi
+fi
+
+if [[ ! -c /dev/vsock ]]; then
+    echo "error: host vsock device is unavailable: /dev/vsock" >&2
+    exit 1
+fi

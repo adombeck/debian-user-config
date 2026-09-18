@@ -1,0 +1,10 @@
+# Template for the optional Copilot E2E sudo policy.
+#
+# sudoers/install.sh replaces __COPILOT_UID__ with the installing user's UID
+# and installs the two root-owned helper commands referenced below.
+
+Cmnd_Alias DEBIAN_USER_CONFIG_COPILOT_E2E = \
+    /usr/local/libexec/debian-user-config/copilot-setup-vsock "", \
+    /usr/local/libexec/debian-user-config/copilot-e2e-guestfish *
+
+__COPILOT_UID__ ALL=(root) NOPASSWD: DEBIAN_USER_CONFIG_COPILOT_E2E
