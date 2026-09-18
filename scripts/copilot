@@ -85,10 +85,10 @@ fi
 mkdir -p "$HOST_CACHE_DIR"
 HOST_CACHE_DIR="$(realpath "$HOST_CACHE_DIR")"
 
-# Share package-manager caches so builds can reuse host downloads. These paths
-# are cache/toolchain data, not credential stores.
-SHARED_CACHE_BIND_ARGS=()
-add_shared_cache_dir() {
+# Use host package-manager caches as read-only lower layers. Sandbox writes go
+# to persistent upper layers under COPILOT_HOME instead of touching the host
+# cache directories.
+validate_shared_cache_dir() {
     local cache_dir="$1"
     if [[ -L "$cache_dir" ]]; then
         echo "error: refusing to use symlinked shared cache directory: $cache_dir" >&2
@@ -98,15 +98,14 @@ add_shared_cache_dir() {
         exit 1
     fi
     mkdir -p "$cache_dir"
-    cache_dir="$(realpath "$cache_dir")"
-    SHARED_CACHE_BIND_ARGS+=(--bind "$cache_dir" "$cache_dir")
+    realpath "$cache_dir"
 }
 
-add_shared_cache_dir "$HOME/go/pkg/mod"
-add_shared_cache_dir "$HOME/.cargo/registry"
-add_shared_cache_dir "$HOME/.cargo/git"
-add_shared_cache_dir "$HOME/.rustup"
-add_shared_cache_dir "$HOME/.npm"
+GO_MOD_CACHE_DIR="$(validate_shared_cache_dir "$HOME/go/pkg/mod")"
+CARGO_REGISTRY_CACHE_DIR="$(validate_shared_cache_dir "$HOME/.cargo/registry")"
+CARGO_GIT_CACHE_DIR="$(validate_shared_cache_dir "$HOME/.cargo/git")"
+RUSTUP_CACHE_DIR="$(validate_shared_cache_dir "$HOME/.rustup")"
+NPM_CACHE_DIR="$(validate_shared_cache_dir "$HOME/.npm")"
 
 # Resolve real paths so a symlinked cwd still matches under PROJECTS_DIR.
 PROJECTS_DIR="$(realpath "$PROJECTS_DIR")"
@@ -252,6 +251,56 @@ fi
 # something to bind (bwrap --bind requires the source to exist).
 mkdir -p "$COPILOT_HOME"
 COPILOT_HOME="$(realpath "$COPILOT_HOME")"
+
+CACHE_OVERLAY_HOME="$COPILOT_HOME/cache-overlays"
+if [[ -L "$CACHE_OVERLAY_HOME" ]]; then
+    echo "error: refusing to use symlinked cache overlay directory: $CACHE_OVERLAY_HOME" >&2
+    exit 1
+elif [[ -e "$CACHE_OVERLAY_HOME" && ! -d "$CACHE_OVERLAY_HOME" ]]; then
+    echo "error: cache overlay path is not a directory: $CACHE_OVERLAY_HOME" >&2
+    exit 1
+fi
+mkdir -p "$CACHE_OVERLAY_HOME"
+chmod 700 "$CACHE_OVERLAY_HOME"
+
+SHARED_CACHE_OVERLAY_PARENT_ARGS=(
+    --dir "$HOME"
+    --dir "$HOME/.cache"
+    --dir "$HOME/go"
+    --dir "$HOME/go/pkg"
+    --dir "$HOME/.cargo"
+    --dir "$HOME/.cargo/registry"
+    --dir "$HOME/.cargo/git"
+    --dir "$HOME/.rustup"
+    --dir "$HOME/.npm"
+)
+SHARED_CACHE_OVERLAY_ARGS=()
+add_shared_cache_overlay() {
+    local name="$1"
+    local lower_dir="$2"
+    local destination="$3"
+    local overlay_dir="$CACHE_OVERLAY_HOME/$name"
+    local upper_dir="$overlay_dir/upper"
+    local work_dir="$overlay_dir/work"
+
+    if [[ -L "$overlay_dir" || -L "$upper_dir" || -L "$work_dir" ]]; then
+        echo "error: refusing to use symlinked cache overlay: $overlay_dir" >&2
+        exit 1
+    fi
+    mkdir -p "$upper_dir" "$work_dir"
+    chmod 700 "$overlay_dir" "$upper_dir" "$work_dir"
+    SHARED_CACHE_OVERLAY_ARGS+=(
+        --overlay-src "$lower_dir"
+        --overlay "$upper_dir" "$work_dir" "$destination"
+    )
+}
+
+add_shared_cache_overlay "xdg-cache" "$HOST_CACHE_DIR" "$HOST_CACHE_DIR"
+add_shared_cache_overlay "go-mod" "$GO_MOD_CACHE_DIR" "$GO_MOD_CACHE_DIR"
+add_shared_cache_overlay "cargo-registry" "$CARGO_REGISTRY_CACHE_DIR" "$CARGO_REGISTRY_CACHE_DIR"
+add_shared_cache_overlay "cargo-git" "$CARGO_GIT_CACHE_DIR" "$CARGO_GIT_CACHE_DIR"
+add_shared_cache_overlay "rustup" "$RUSTUP_CACHE_DIR" "$RUSTUP_CACHE_DIR"
+add_shared_cache_overlay "npm" "$NPM_CACHE_DIR" "$NPM_CACHE_DIR"
 
 E2E_SUDO_SOCKET=
 E2E_SUDO_HELPER_PID=
@@ -730,6 +779,7 @@ bwrap \
     --ro-bind /lib /lib \
     --ro-bind-try /lib64 /lib64 \
     --ro-bind-try /snap /snap \
+    "${SHARED_CACHE_OVERLAY_PARENT_ARGS[@]}" \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
     "${UV_HOST_PYTHON_BIND_ARGS[@]}" \
     "${PODMAN_BIND_ARGS[@]}" \
@@ -768,8 +818,7 @@ bwrap \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
-    --bind "$HOST_CACHE_DIR" "$HOST_CACHE_DIR" \
-    "${SHARED_CACHE_BIND_ARGS[@]}" \
+    "${SHARED_CACHE_OVERLAY_ARGS[@]}" \
     "${E2E_SUDO_CLIENT_BIND_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_PARENT_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_BIND_ARGS[@]}" \
