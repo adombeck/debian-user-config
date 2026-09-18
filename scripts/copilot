@@ -190,6 +190,24 @@ PODMAN_BIN_DIR="$HOME/.local/libexec/debian-user-config"
 PODMAN_BIN="$PODMAN_BIN_DIR/copilot-podman"
 PODMAN_BIND_ARGS=()
 SANDBOX_PATH="$PATH"
+
+# Expose Cargo-installed build tools such as cbindgen without exposing the
+# rest of the user's home directory. Keep the directory read-only because
+# tool installation belongs on the host.
+CARGO_BIN_DIR="$HOME/.cargo/bin"
+CARGO_BIN_BIND_ARGS=()
+if [[ -L "$CARGO_BIN_DIR" ]]; then
+    echo "error: refusing to use symlinked Cargo bin directory: $CARGO_BIN_DIR" >&2
+    exit 1
+elif [[ -e "$CARGO_BIN_DIR" && ! -d "$CARGO_BIN_DIR" ]]; then
+    echo "error: Cargo bin path is not a directory: $CARGO_BIN_DIR" >&2
+    exit 1
+elif [[ -d "$CARGO_BIN_DIR" ]]; then
+    CARGO_BIN_DIR="$(realpath "$CARGO_BIN_DIR")"
+    CARGO_BIN_BIND_ARGS=(--ro-bind "$CARGO_BIN_DIR" "$CARGO_BIN_DIR")
+    SANDBOX_PATH="$CARGO_BIN_DIR:$SANDBOX_PATH"
+fi
+
 if command -v podman >/dev/null 2>&1; then
     PODMAN_SOURCE="$(command -v podman)"
     if [[ "$PODMAN_SOURCE" != /* || ! -f "$PODMAN_SOURCE" || ! -x "$PODMAN_SOURCE" ]]; then
@@ -715,6 +733,7 @@ bwrap \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
     "${UV_HOST_PYTHON_BIND_ARGS[@]}" \
     "${PODMAN_BIND_ARGS[@]}" \
+    "${CARGO_BIN_BIND_ARGS[@]}" \
     --ro-bind-try "${HOME}/go/bin" "${HOME}/go/bin" \
     --ro-bind-try /etc/alternatives /etc/alternatives \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
