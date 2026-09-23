@@ -158,6 +158,8 @@ def grant_qemu_access(artifacts_dir, vm_name):
             raise RuntimeError(f"VM artifact is not a regular file: {entry.path}")
         if file_stat.st_nlink != 1:
             raise RuntimeError(f"VM artifact has multiple hard links: {entry.path}")
+        if file_stat.st_uid == 0 and memory_snapshot.fullmatch(name):
+            continue
         if file_stat.st_uid not in {caller_uid, qemu_uid}:
             raise RuntimeError(
                 f"VM artifact is not owned by the invoking user: {entry.path}"
