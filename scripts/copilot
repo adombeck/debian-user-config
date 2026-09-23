@@ -584,6 +584,20 @@ else
     exit 1
 fi
 
+# Expose the host package database read-only so dpkg-query and
+# dpkg-checkbuilddeps can recognize packages whose files are already visible
+# under /usr. Package installation remains unavailable: apt state is not
+# exposed and the system paths are mounted read-only.
+DPKG_STATE_BIND_ARGS=()
+if [[ -f /var/lib/dpkg/status && -r /var/lib/dpkg/status ]]; then
+    DPKG_STATE_DIR="$(realpath /var/lib/dpkg)"
+    DPKG_STATE_BIND_ARGS=(
+        --dir /var
+        --dir /var/lib
+        --ro-bind "$DPKG_STATE_DIR" /var/lib/dpkg
+    )
+fi
+
 # Authentication uses the private keyring; do not inherit host credentials or
 # agent sockets into the sandbox unless an agent was explicitly selected above.
 SANDBOX_ENV_ARGS=(
@@ -816,6 +830,7 @@ bwrap \
     --dir /sys \
     --dir /sys/fs \
     --dir /sys/fs/cgroup \
+    "${DPKG_STATE_BIND_ARGS[@]}" \
     --dir /var/run/libvirt \
     "${AUTHD_E2E_TEST_RUNS_PARENT_ARGS[@]}" \
     "${LIBVIRT_BIND_ARGS[@]}" \
