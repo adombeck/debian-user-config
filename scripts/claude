@@ -2,8 +2,9 @@
 #
 # Run Claude Code in a bubblewrap sandbox with filesystem access restricted to
 # ~/projects (read-write) and a minimal read-only base system. If the cwd is
-# outside ~/projects, it's bind-mounted in as well so Claude can still work
-# there. Network is left up, since Claude Code needs to reach
+# outside ~/projects, its Git repository root is bind-mounted when available;
+# otherwise the cwd is bind-mounted so Claude can still work there. Network is
+# left up, since Claude Code needs to reach
 # api.anthropic.com; narrow this further with a network namespace + proxy if
 # you want a domain allowlist too.
 #
@@ -32,14 +33,21 @@ PROJECTS_DIR="$(realpath "$PROJECTS_DIR")"
 CWD="$(realpath "$PWD")"
 WORKDIR="$CWD"
 
-# If the cwd isn't already covered by the PROJECTS_DIR bind mount, bind it
-# in separately so Claude can still read/write it.
+# Mount the repository root when the cwd is inside a repository so Claude can
+# access the repository metadata and the rest of the worktree.
+MOUNT_DIR="$CWD"
+if REPO_ROOT="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)"; then
+    MOUNT_DIR="$(realpath "$REPO_ROOT")"
+fi
+
+# If the mount directory isn't already covered by the PROJECTS_DIR bind mount,
+# bind it in separately so Claude can still read/write it.
 EXTRA_BIND_ARGS=()
-case "$CWD" in
+case "$MOUNT_DIR" in
     "$PROJECTS_DIR"|"$PROJECTS_DIR"/*)
         ;;
     *)
-        EXTRA_BIND_ARGS=(--bind "$CWD" "$CWD")
+        EXTRA_BIND_ARGS=(--bind "$MOUNT_DIR" "$MOUNT_DIR")
         ;;
 esac
 
