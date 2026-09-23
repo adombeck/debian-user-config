@@ -16,10 +16,10 @@
 # --allow-e2e-tests for VM lifecycle and provisioning workflows only when
 # necessary. WARNING: that profile exposes the host's read-write libvirt
 # system socket, which effectively grants root access on the host despite the
-# sandbox. It also exposes the authd E2E test-run directory. Sudo commands from
-# the sandbox are forwarded to a host-side helper and executed by host sudo
-# under your normal sudoers policy. Only the read-only guestfish cloud-init
-# checks are allowlisted; all other sandbox sudo requests are rejected. See
+# sandbox. It also exposes the authd E2E test-run directory. Requests from the
+# sandbox are forwarded to a host-side helper. It runs read-only guestfish
+# checks through sudo and grants scoped ACLs for the current user's E2E VM
+# images; all other requests are rejected. See
 # https://libvirt.org/daemons.html#monolithic-sockets and use this mode only
 # with fully trusted prompts and code.
 #
@@ -655,6 +655,7 @@ if [[ "$SSH_AGENT_ENABLED" == true ]]; then
 fi
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     SANDBOX_ENV_ARGS+=(--setenv COPILOT_E2E_SUDO_SOCKET "$E2E_SUDO_SOCKET")
+    SANDBOX_ENV_ARGS+=(--setenv COPILOT_E2E_QEMU_ACCESS true)
 fi
 
 # Expose read-only libvirt metadata by default. VM lifecycle operations such as
@@ -757,6 +758,7 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     trap cleanup_e2e_sudo_helper EXIT
     "$SCRIPT_DIR/copilot-e2e-sudo-helper" \
         "$E2E_SUDO_SOCKET" \
+        "$AUTHD_E2E_DATA_DIR" \
         "${E2E_SUDO_ALLOWED_IMAGE_ROOTS[@]}" &
     E2E_SUDO_HELPER_PID=$!
     E2E_SUDO_HELPER_READY=false
