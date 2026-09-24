@@ -351,6 +351,21 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         chmod 755 "$E2E_SUDO_CLIENT_TEMP"
         mv -f "$E2E_SUDO_CLIENT_TEMP" "$E2E_SUDO_CLIENT"
     fi
+    E2E_VIRSH_CLIENT="$E2E_SUDO_CLIENT_DIR/virsh"
+    if [[ -L "$E2E_VIRSH_CLIENT" ]]; then
+        echo "error: refusing to use symlinked E2E virsh client: $E2E_VIRSH_CLIENT" >&2
+        exit 1
+    elif [[ -e "$E2E_VIRSH_CLIENT" && ! -f "$E2E_VIRSH_CLIENT" ]]; then
+        echo "error: E2E virsh client path is not a regular file: $E2E_VIRSH_CLIENT" >&2
+        exit 1
+    fi
+    if [[ ! -e "$E2E_VIRSH_CLIENT" ]] ||
+        ! cmp -s "$SCRIPT_DIR/copilot-e2e-virsh" "$E2E_VIRSH_CLIENT"; then
+        E2E_VIRSH_CLIENT_TEMP="$(mktemp "$E2E_SUDO_CLIENT_DIR/.virsh.XXXXXX")"
+        cp "$SCRIPT_DIR/copilot-e2e-virsh" "$E2E_VIRSH_CLIENT_TEMP"
+        chmod 755 "$E2E_VIRSH_CLIENT_TEMP"
+        mv -f "$E2E_VIRSH_CLIENT_TEMP" "$E2E_VIRSH_CLIENT"
+    fi
     E2E_SUDO_CLIENT_BIND_ARGS=(--ro-bind "$E2E_SUDO_CLIENT_DIR" "$E2E_SUDO_CLIENT_DIR")
     SANDBOX_PATH="$E2E_SUDO_CLIENT_DIR:$SANDBOX_PATH"
 

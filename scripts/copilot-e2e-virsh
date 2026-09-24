@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REAL_VIRSH="${COPILOT_E2E_REAL_VIRSH:-/usr/bin/virsh}"
+
+if [[ "${COPILOT_E2E_QEMU_ACCESS:-}" != true ||
+    -z "${AUTHD_E2E_DATA_DIR:-}" ]]; then
+    exec "$REAL_VIRSH" "$@"
+fi
+
+args=("$@")
+global_args=()
+command_index=0
+while ((command_index < ${#args[@]})); do
+    argument="${args[$command_index]}"
+    case "${argument}" in
+        -c|--connect|-d|--debug|-l|--log|-t|--timeout|-k|--keepalive-interval|-K|--keepalive-count)
+            if ((command_index + 1 >= ${#args[@]})); then
+                exec "$REAL_VIRSH" "$@"
+            fi
+            global_args+=("${argument}" "${args[$((command_index + 1))]}")
+            command_index=$((command_index + 2))
+            ;;
+        --connect=*|--debug=*|--log=*|--timeout=*|--keepalive-interval=*|--keepalive-count=*)
+            global_args+=("${argument}")
+            command_index=$((command_index + 1))
+            ;;
+        -q|--quiet|-r|--readonly)
+            global_args+=("${argument}")
+            command_index=$((command_index + 1))
+            ;;
+        --)
+            command_index=$((command_index + 1))
+            break
+            ;;
+        -*)
+            exec "$REAL_VIRSH" "$@"
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+subcommand="${args[$command_index]:-}"
+domain=
+case "${subcommand}" in
+    start|snapshot-revert)
+        domain="${args[$((command_index + 1))]:-}"
+        ;;
+    snapshot-create-as)
+        index=$((command_index + 1))
+        while ((index < ${#args[@]})); do
+            case "${args[$index]}" in
+                --domain)
+                    domain="${args[$((index + 1))]:-}"
+                    break
+                    ;;
+                --domain=*)
+                    domain="${args[$index]#--domain=}"
+                    break
+                    ;;
+            esac
+            index=$((index + 1))
+        done
+        ;;
+    *)
+        exec "$REAL_VIRSH" "$@"
+        ;;
+esac
+
+if [[ -z "$domain" ]]; then
+    exec "$REAL_VIRSH" "$@"
+fi
+
+if ! domain_xml="$("$REAL_VIRSH" "${global_args[@]}" dumpxml "$domain")"; then
+    exec "$REAL_VIRSH" "$@"
+fi
+
+disk_image="$(
+    printf '%s\n' "$domain_xml" |
+        /usr/bin/xmllint \
+            --xpath 'string(/domain/devices/disk[@device="disk" and target/@dev="vda"]/source/@file)' \
+            - 2>/dev/null || true
+)"
+if [[ -z "$disk_image" ]]; then
+    exec "$REAL_VIRSH" "$@"
+fi
+
+data_root="$(/usr/bin/realpath -- "$AUTHD_E2E_DATA_DIR")"
+disk_image="$(/usr/bin/realpath -- "$disk_image" 2>/dev/null || true)"
+if [[ -z "$disk_image" || "$disk_image" != "$data_root/"* ]]; then
+    exec "$REAL_VIRSH" "$@"
+fi
+
+sudo qemu-access "$(/usr/bin/dirname -- "$disk_image")" "$domain"
+exec "$REAL_VIRSH" "$@"

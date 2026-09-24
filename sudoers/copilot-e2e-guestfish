@@ -47,8 +47,15 @@ if [[ "$IMAGE" != *.qcow2 ]]; then
 fi
 
 IMAGE="$(/usr/bin/realpath -- "$IMAGE")"
-if [[ ! -f "$IMAGE" || "$(/usr/bin/stat -c '%u' -- "$IMAGE")" != "$SUDO_UID" ]]; then
-    echo "error: guestfish image is not a regular file owned by the invoking user" >&2
+if [[ ! -f "$IMAGE" ]]; then
+    echo "error: guestfish image is not a regular file" >&2
+    exit 1
+fi
+
+IMAGE_UID="$(/usr/bin/stat -c '%u' -- "$IMAGE")"
+QEMU_UID="$(/usr/bin/id -u libvirt-qemu 2>/dev/null || true)"
+if [[ "$IMAGE_UID" != "$SUDO_UID" && "$IMAGE_UID" != "$QEMU_UID" ]]; then
+    echo "error: guestfish image is not owned by the invoking user or libvirt-qemu" >&2
     exit 1
 fi
 
