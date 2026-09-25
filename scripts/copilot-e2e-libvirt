@@ -1,0 +1,70 @@
+#!/usr/bin/bash
+
+set -euo pipefail
+umask 077
+
+if [[ -z "${COPILOT_E2E_LIBVIRT_UID:-}" ||
+    -z "${COPILOT_E2E_LIBVIRT_KVM_GID:-}" ||
+    -z "${COPILOT_E2E_LIBVIRT_RUNTIME_DIR:-}" ||
+    -z "${COPILOT_E2E_LIBVIRT_CONFIG_HOME:-}" ||
+    -z "${COPILOT_E2E_LIBVIRT_CACHE_HOME:-}" ||
+    -z "${COPILOT_E2E_LIBVIRT_DATA_HOME:-}" ||
+    -z "${COPILOT_E2E_LIBVIRT_HOME:-}" ||
+    -z "${AUTHD_E2E_DATA_DIR:-}" ]]; then
+    echo "error: required E2E libvirt environment is incomplete" >&2
+    exit 1
+fi
+
+E2E_LIBVIRT_EFFECTIVE_GID=
+while IFS= read -r status_line; do
+    if [[ "$status_line" != Gid:* ]]; then
+        continue
+    fi
+    read -r _ _ E2E_LIBVIRT_EFFECTIVE_GID _ _ <<<"$status_line"
+    break
+done </proc/self/status
+if [[ "$EUID" != "$COPILOT_E2E_LIBVIRT_UID" ||
+    "$E2E_LIBVIRT_EFFECTIVE_GID" != "$COPILOT_E2E_LIBVIRT_KVM_GID" ]]; then
+    echo "error: E2E libvirt must run as the invoking user with the kvm group (uid=$EUID gid=$E2E_LIBVIRT_EFFECTIVE_GID)" >&2
+    exit 1
+fi
+
+APPARMOR_PROFILE="$(</proc/self/attr/current)"
+if [[ "$APPARMOR_PROFILE" != debian-user-config-copilot-e2e-libvirt* ]]; then
+    echo "error: E2E libvirt AppArmor profile is not active" >&2
+    echo "error: install it with ./apparmor/install-e2e-libvirt.sh" >&2
+    exit 1
+fi
+
+if [[ ! -d "$AUTHD_E2E_DATA_DIR" ||
+    ! -d "$COPILOT_E2E_LIBVIRT_RUNTIME_DIR" ||
+    ! -d "$COPILOT_E2E_LIBVIRT_CONFIG_HOME" ||
+    ! -d "$COPILOT_E2E_LIBVIRT_CACHE_HOME" ||
+    ! -d "$COPILOT_E2E_LIBVIRT_DATA_HOME" ||
+    ! -d "$COPILOT_E2E_LIBVIRT_HOME" ]]; then
+    echo "error: an E2E libvirt data or runtime directory is missing" >&2
+    exit 1
+fi
+
+if [[ ! -c /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ||
+    ! -c /dev/vhost-vsock || ! -r /dev/vhost-vsock || ! -w /dev/vhost-vsock ]]; then
+    echo "error: E2E libvirt cannot access the KVM or VSOCK devices" >&2
+    exit 1
+fi
+
+if ! : >"$COPILOT_E2E_LIBVIRT_RUNTIME_DIR/libvirt/.profile-write-check"; then
+    echo "error: AppArmor does not permit writes to the private libvirt runtime" >&2
+    exit 1
+fi
+
+export HOME="$COPILOT_E2E_LIBVIRT_HOME"
+export XDG_RUNTIME_DIR="$COPILOT_E2E_LIBVIRT_RUNTIME_DIR"
+export XDG_CONFIG_HOME="$COPILOT_E2E_LIBVIRT_CONFIG_HOME"
+export XDG_CACHE_HOME="$COPILOT_E2E_LIBVIRT_CACHE_HOME"
+export XDG_DATA_HOME="$COPILOT_E2E_LIBVIRT_DATA_HOME"
+export TMPDIR="$COPILOT_E2E_LIBVIRT_HOME/tmp"
+export LIBVIRT_DEFAULT_URI=qemu:///session
+export LIBVIRT_LOG_OUTPUTS=3:stderr
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+exec /usr/sbin/libvirtd --timeout 86400

@@ -14,20 +14,14 @@
 #
 # Libvirt is exposed through its read-only socket by default. Pass
 # --allow-e2e-tests for VM lifecycle and provisioning workflows only when
-# necessary. WARNING: that profile exposes the host's read-write libvirt
-# system socket, which effectively grants root access on the host despite the
-# sandbox. It also exposes the authd E2E test-run directory. Requests from the
-# sandbox are forwarded to a host-side helper. It runs read-only guestfish
-# checks through sudo and grants scoped ACLs for the current user's E2E VM
-# images; all other requests are rejected. See
-# https://libvirt.org/daemons.html#monolithic-sockets and use this mode only
-# with fully trusted prompts and code.
+# necessary. That profile starts a per-user libvirt session for E2E VMs,
+# confined by AppArmor to a dedicated data directory and the KVM/VSOCK devices.
+# It never exposes the host's system libvirt socket or system-libvirt VM files.
+# Install its AppArmor policy once with ./apparmor/install-e2e-libvirt.sh. Remove the
+# legacy scoped sudo helpers, if previously installed, with ./sudoers/uninstall.sh.
 #
 # On Ubuntu systems with bwrap-userns-restrict, install the scoped AppArmor
 # transition once with: ./apparmor/install.sh
-#
-# To run --allow-e2e-tests without a sudo password prompt, install the scoped
-# sudo policy and its root-owned helpers once with: ./sudoers/install.sh
 #
 # Copilot runs with a private D-Bus session and GNOME Keyring. Only its
 # dedicated keyring data under COPILOT_HOME is persisted; the host session bus,
@@ -59,11 +53,9 @@ if [[ "${1:-}" == "--allow-e2e-tests" ]]; then
     ALLOW_E2E_TESTS=true
     shift
     cat >&2 <<'EOF'
-warning: --allow-e2e-tests exposes the host's read-write libvirt system socket
-warning: and /run/user/1001/authd-e2e-test-runs
-warning: access to that socket effectively grants root access on the host despite the sandbox
-warning: use this mode only with fully trusted prompts and code
-see: https://libvirt.org/daemons.html#monolithic-sockets
+warning: --allow-e2e-tests starts an AppArmor-confined, per-user libvirt session
+warning: it does not expose the host's system libvirt socket or grant host root
+warning: E2E VM data is kept separately under ~/.local/share/copilot-e2e-tests
 EOF
 fi
 
@@ -165,29 +157,35 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         fi
     done </proc/self/status
     if [[ "$NO_NEW_PRIVS" == 1 ]]; then
-        echo "error: --allow-e2e-tests must be started outside a no_new_privileges sandbox" >&2
+        echo "error: --allow-e2e-tests must be started outside a no_new_privileges sandbox to select the kvm group" >&2
         exit 1
     fi
-    if ! command -v sudo >/dev/null 2>&1; then
-        echo "error: sudo is required for --allow-e2e-tests" >&2
-        exit 1
-    fi
-    for helper in copilot-e2e-sudo-helper copilot-e2e-sudo; do
+    for helper in copilot-e2e-sudo copilot-e2e-virsh copilot-e2e-libvirt; do
         if [[ ! -x "$SCRIPT_DIR/$helper" ]]; then
             echo "error: E2E helper is missing or not executable: $SCRIPT_DIR/$helper" >&2
             exit 1
         fi
     done
     for helper in \
-        /usr/local/libexec/debian-user-config/copilot-setup-vsock \
-        /usr/local/libexec/debian-user-config/copilot-e2e-guestfish
+        /usr/sbin/libvirtd \
+        /usr/bin/virsh \
+        /usr/bin/qemu-system-x86_64 \
+        /usr/bin/guestfish \
+        /usr/bin/socat
     do
         if [[ ! -x "$helper" ]]; then
-            echo "error: E2E sudo helper is missing or not executable: $helper" >&2
-            echo "error: install it with ./sudoers/install.sh" >&2
+            echo "error: E2E dependency is missing or not executable: $helper" >&2
             exit 1
         fi
     done
+    if ! command -v newgrp >/dev/null 2>&1; then
+        echo "error: newgrp is required to run QEMU with the existing kvm group" >&2
+        exit 1
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "error: systemctl is required to check VSOCK journal support" >&2
+        exit 1
+    fi
 fi
 
 # Stage a private, read-only Podman executable at the path covered by the
@@ -310,31 +308,146 @@ add_shared_cache_overlay "cargo-git" "$CARGO_GIT_CACHE_DIR" "$CARGO_GIT_CACHE_DI
 add_shared_cache_overlay "rustup" "$RUSTUP_CACHE_DIR" "$RUSTUP_CACHE_DIR"
 add_shared_cache_overlay "npm" "$NPM_CACHE_DIR" "$NPM_CACHE_DIR"
 
-E2E_SUDO_SOCKET=
-E2E_SUDO_SOCKET_DIR=
-E2E_SUDO_HELPER_PID=
+E2E_LIBVIRT_RUNTIME_DIR=
+E2E_LIBVIRT_SOCKET_DIR=
+E2E_LIBVIRT_CONFIG_HOME=
+E2E_LIBVIRT_CACHE_HOME=
+E2E_LIBVIRT_DATA_HOME=
+E2E_LIBVIRT_HOME=
+E2E_LIBVIRT_LOG=
+E2E_LIBVIRT_LAUNCHER_DIR=
+E2E_LIBVIRT_LAUNCHER=
+E2E_LIBVIRT_UNIT=
+E2E_LIBVIRT_SCOPE_PID=
+E2E_LIBVIRT_KVM_GID=
 E2E_SUDO_CLIENT_BIND_ARGS=()
-E2E_SUDO_ALLOWED_IMAGE_ROOTS=()
+E2E_LIBVIRT_SOCKET_BIND_ARGS=()
 E2E_SSH_PUBLIC_KEY_PARENT_ARGS=()
 E2E_SSH_PUBLIC_KEY_BIND_ARGS=()
 
-cleanup_e2e_sudo_helper() {
-    if [[ -n "$E2E_SUDO_HELPER_PID" ]]; then
-        if kill -0 "$E2E_SUDO_HELPER_PID" 2>/dev/null; then
-            kill "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
-        fi
-        wait "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
-    fi
-    if [[ -n "$E2E_SUDO_SOCKET_DIR" ]]; then
-        rmdir -- "$E2E_SUDO_SOCKET_DIR" 2>/dev/null || true
-    fi
-}
-
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    trap cleanup_e2e_sudo_helper EXIT
-    # Keep concurrent sandbox instances from unlinking each other's sockets.
-    E2E_SUDO_SOCKET_DIR="$(mktemp -d "$COPILOT_HOME/.e2e-sudo.XXXXXXXX")"
-    E2E_SUDO_SOCKET="$E2E_SUDO_SOCKET_DIR/sock"
+    HOST_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [[ -L "$HOST_XDG_RUNTIME_DIR" || ! -d "$HOST_XDG_RUNTIME_DIR" ]]; then
+        echo "error: invalid host XDG_RUNTIME_DIR: $HOST_XDG_RUNTIME_DIR" >&2
+        exit 1
+    fi
+    if [[ "$(stat -c '%u' "$HOST_XDG_RUNTIME_DIR")" != "$(id -u)" ]]; then
+        echo "error: host XDG_RUNTIME_DIR is not owned by the current user" >&2
+        exit 1
+    fi
+
+    if ! KVM_GROUP_ENTRY="$(getent group kvm)"; then
+        echo "error: the kvm group is required for rootless E2E VMs" >&2
+        exit 1
+    fi
+    IFS=: read -r _ _ E2E_LIBVIRT_KVM_GID _ <<<"$KVM_GROUP_ENTRY"
+    if [[ ! "$E2E_LIBVIRT_KVM_GID" =~ ^[0-9]+$ ]] ||
+        ! id -nG | tr ' ' '\n' | grep -Fxq kvm; then
+        echo "error: the current user must belong to the kvm group for E2E VMs" >&2
+        exit 1
+    fi
+    for device in /dev/kvm /dev/vhost-vsock /dev/vsock; do
+        if [[ ! -c "$device" ]]; then
+            echo "error: required E2E virtualization device is unavailable: $device" >&2
+            exit 1
+        fi
+    done
+    if [[ ! -r /dev/kvm || ! -w /dev/kvm ||
+        ! -r /dev/vhost-vsock || ! -w /dev/vhost-vsock ]]; then
+        echo "error: the current user cannot access /dev/kvm and /dev/vhost-vsock" >&2
+        echo "error: join the kvm group, then log in again" >&2
+        exit 1
+    fi
+
+    SYSTEMD_VERSION="$(systemctl --version | awk 'NR == 1 { print $2 }')"
+    if [[ ! "$SYSTEMD_VERSION" =~ ^[0-9]+$ ]] ||
+        ((SYSTEMD_VERSION < 256)); then
+        echo "error: rootless E2E VM journaling requires systemd 256 or newer for VSOCK" >&2
+        exit 1
+    fi
+
+    AUTHD_E2E_DATA_HOST_DIR="$HOME/.local/share/copilot-e2e-tests"
+    for directory in "$HOME/.local" "$HOME/.local/share" "$AUTHD_E2E_DATA_HOST_DIR"; do
+        if [[ -L "$directory" ]]; then
+            echo "error: refusing to use a symlinked E2E data directory: $directory" >&2
+            exit 1
+        elif [[ -e "$directory" && ! -d "$directory" ]]; then
+            echo "error: E2E data path is not a directory: $directory" >&2
+            exit 1
+        fi
+    done
+    mkdir -p "$AUTHD_E2E_DATA_HOST_DIR"
+    chmod 700 "$AUTHD_E2E_DATA_HOST_DIR"
+    AUTHD_E2E_DATA_HOST_DIR="$(realpath "$AUTHD_E2E_DATA_HOST_DIR")"
+    if [[ "$(stat -c '%u' "$AUTHD_E2E_DATA_HOST_DIR")" != "$(id -u)" ]]; then
+        echo "error: E2E data directory is not owned by the current user" >&2
+        exit 1
+    fi
+    AUTHD_E2E_DATA_DIR="$AUTHD_E2E_DATA_HOST_DIR"
+
+    E2E_LIBVIRT_RUNTIME_DIR="$(mktemp -d "$HOST_XDG_RUNTIME_DIR/copilot-e2e-libvirt.XXXXXXXX")"
+    chmod 700 "$E2E_LIBVIRT_RUNTIME_DIR"
+    E2E_LIBVIRT_SOCKET_DIR="$E2E_LIBVIRT_RUNTIME_DIR/libvirt"
+    E2E_LIBVIRT_CONFIG_HOME="$E2E_LIBVIRT_RUNTIME_DIR/config"
+    E2E_LIBVIRT_CACHE_HOME="$E2E_LIBVIRT_RUNTIME_DIR/cache"
+    E2E_LIBVIRT_DATA_HOME="$E2E_LIBVIRT_RUNTIME_DIR/data"
+    E2E_LIBVIRT_HOME="$E2E_LIBVIRT_RUNTIME_DIR/home"
+    E2E_LIBVIRT_PRIVATE_DIRS=(
+        "$E2E_LIBVIRT_SOCKET_DIR"
+        "$E2E_LIBVIRT_CONFIG_HOME"
+        "$E2E_LIBVIRT_CONFIG_HOME/libvirt"
+        "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu"
+        "$E2E_LIBVIRT_CACHE_HOME"
+        "$E2E_LIBVIRT_CACHE_HOME/libvirt"
+        "$E2E_LIBVIRT_CACHE_HOME/libvirt/qemu"
+        "$E2E_LIBVIRT_CACHE_HOME/libvirt/qemu/log"
+        "$E2E_LIBVIRT_DATA_HOME"
+        "$E2E_LIBVIRT_DATA_HOME/libvirt"
+        "$E2E_LIBVIRT_DATA_HOME/libvirt/qemu"
+        "$E2E_LIBVIRT_HOME"
+        "$E2E_LIBVIRT_SOCKET_DIR/common"
+        "$E2E_LIBVIRT_SOCKET_DIR/interface/run"
+        "$E2E_LIBVIRT_SOCKET_DIR/network/lib"
+        "$E2E_LIBVIRT_SOCKET_DIR/network/run"
+        "$E2E_LIBVIRT_SOCKET_DIR/nodedev/run"
+        "$E2E_LIBVIRT_SOCKET_DIR/qemu/run"
+        "$E2E_LIBVIRT_SOCKET_DIR/secrets/run"
+        "$E2E_LIBVIRT_SOCKET_DIR/storage/run"
+        "$E2E_LIBVIRT_HOME/tmp"
+    )
+    mkdir -p "${E2E_LIBVIRT_PRIVATE_DIRS[@]}"
+    chmod 700 "${E2E_LIBVIRT_PRIVATE_DIRS[@]}"
+    printf 'security_driver = "none"\n' \
+        >"$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf"
+    chmod 600 "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf"
+    E2E_LIBVIRT_LOG="$E2E_LIBVIRT_RUNTIME_DIR/launcher.log"
+
+    E2E_LIBVIRT_LAUNCHER_DIR="$HOME/.local/libexec/debian-user-config-e2e"
+    if [[ -L "$E2E_LIBVIRT_LAUNCHER_DIR" ]]; then
+        echo "error: refusing to use symlinked E2E libvirt launcher directory" >&2
+        exit 1
+    elif [[ -e "$E2E_LIBVIRT_LAUNCHER_DIR" &&
+        ! -d "$E2E_LIBVIRT_LAUNCHER_DIR" ]]; then
+        echo "error: E2E libvirt launcher path is not a directory" >&2
+        exit 1
+    fi
+    mkdir -p "$E2E_LIBVIRT_LAUNCHER_DIR"
+    chmod 700 "$E2E_LIBVIRT_LAUNCHER_DIR"
+    E2E_LIBVIRT_LAUNCHER="$E2E_LIBVIRT_LAUNCHER_DIR/copilot-e2e-libvirt"
+    if [[ -L "$E2E_LIBVIRT_LAUNCHER" ]]; then
+        echo "error: refusing to use symlinked E2E libvirt launcher" >&2
+        exit 1
+    elif [[ -e "$E2E_LIBVIRT_LAUNCHER" && ! -f "$E2E_LIBVIRT_LAUNCHER" ]]; then
+        echo "error: E2E libvirt launcher path is not a regular file" >&2
+        exit 1
+    fi
+    if [[ ! -e "$E2E_LIBVIRT_LAUNCHER" ]] ||
+        ! cmp -s "$SCRIPT_DIR/copilot-e2e-libvirt" "$E2E_LIBVIRT_LAUNCHER"; then
+        E2E_LIBVIRT_LAUNCHER_TEMP="$(mktemp "$E2E_LIBVIRT_LAUNCHER_DIR/.libvirt.XXXXXX")"
+        cp "$SCRIPT_DIR/copilot-e2e-libvirt" "$E2E_LIBVIRT_LAUNCHER_TEMP"
+        chmod 755 "$E2E_LIBVIRT_LAUNCHER_TEMP"
+        mv -f "$E2E_LIBVIRT_LAUNCHER_TEMP" "$E2E_LIBVIRT_LAUNCHER"
+    fi
 
     E2E_SUDO_CLIENT_DIR="$COPILOT_HOME/e2e-sudo"
     if [[ -L "$E2E_SUDO_CLIENT_DIR" ]]; then
@@ -676,14 +789,14 @@ if [[ "$SSH_AGENT_ENABLED" == true ]]; then
     SANDBOX_ENV_ARGS+=(--setenv SSH_AUTH_SOCK /tmp/copilot-runtime/ssh-agent)
 fi
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    SANDBOX_ENV_ARGS+=(--setenv COPILOT_E2E_SUDO_SOCKET "$E2E_SUDO_SOCKET")
-    SANDBOX_ENV_ARGS+=(--setenv COPILOT_E2E_QEMU_ACCESS true)
+    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_LIBVIRT_SESSION true)
+    SANDBOX_ENV_ARGS+=(--setenv LIBVIRT_DEFAULT_URI qemu:///session)
 fi
 
-# Expose read-only libvirt metadata by default. VM lifecycle operations such as
-# snapshot-revert require the writable management socket, so make that access
-# an explicit opt-in rather than silently widening the sandbox's privileges.
+# Expose read-only libvirt metadata by default. The E2E profile binds only the
+# private session socket created for this Copilot launch.
 LIBVIRT_BIND_ARGS=(--bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock)
+E2E_LIBVIRT_SOCKET_BIND_ARGS=()
 AUTHD_E2E_DATA_BIND_ARGS=()
 AUTHD_E2E_TEST_RUNS_PARENT_ARGS=()
 AUTHD_E2E_TEST_RUNS_BIND_ARGS=()
@@ -720,19 +833,12 @@ SANDBOX_ENV_ARGS+=(--setenv AUTHD_ARTIFACTS_DIR "$AUTHD_ARTIFACTS_DIR")
 SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_ARTIFACTS_DIR "$AUTHD_E2E_ARTIFACTS_DIR")
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    if [[ ! -S /var/run/libvirt/libvirt-sock ]]; then
-        echo "error: writable libvirt socket not found: /var/run/libvirt/libvirt-sock" >&2
-        exit 1
-    fi
-    AUTHD_E2E_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/authd-e2e-tests"
-    if [[ ! -d "$AUTHD_E2E_DATA_DIR" ]]; then
-        echo "error: authd E2E data directory not found: $AUTHD_E2E_DATA_DIR" >&2
-        exit 1
-    fi
-    AUTHD_E2E_DATA_DIR="$(realpath "$AUTHD_E2E_DATA_DIR")"
-    LIBVIRT_BIND_ARGS=(--bind /var/run/libvirt/libvirt-sock /var/run/libvirt/libvirt-sock)
+    LIBVIRT_BIND_ARGS=()
+    E2E_LIBVIRT_SOCKET_BIND_ARGS=(
+        --bind "$E2E_LIBVIRT_SOCKET_DIR" /tmp/copilot-runtime/libvirt
+    )
     AUTHD_E2E_DATA_BIND_ARGS=(--bind "$AUTHD_E2E_DATA_DIR" "$AUTHD_E2E_DATA_DIR")
-    AUTHD_E2E_TEST_RUNS_DIR=/run/user/1001/authd-e2e-test-runs
+    AUTHD_E2E_TEST_RUNS_DIR="/run/user/$USER_ID/authd-e2e-test-runs"
     if [[ -L "$AUTHD_E2E_TEST_RUNS_DIR" ]]; then
         echo "error: refusing to use symlinked authd E2E test runs directory: $AUTHD_E2E_TEST_RUNS_DIR" >&2
         exit 1
@@ -743,53 +849,125 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     AUTHD_E2E_TEST_RUNS_PARENT_ARGS=(
         --dir /run
         --dir /run/user
-        --dir /run/user/1001
+        --dir "/run/user/$USER_ID"
     )
     AUTHD_E2E_TEST_RUNS_BIND_ARGS=(
         --bind "$AUTHD_E2E_TEST_RUNS_DIR" "$AUTHD_E2E_TEST_RUNS_DIR"
     )
     SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_DATA_DIR "$AUTHD_E2E_DATA_DIR")
     SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_TEST_RUNS_DIR "$AUTHD_E2E_TEST_RUNS_DIR")
-    SANDBOX_ENV_ARGS+=(--setenv LIBVIRT_DEFAULT_URI qemu:///system)
-    E2E_SUDO_ALLOWED_IMAGE_ROOTS=(
-        "$PROJECTS_DIR"
-        "$COPILOT_HOME"
-        "$AUTHD_E2E_DATA_DIR"
-    )
 fi
 
 VSOCK_DEVICE_BIND_ARGS=()
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    sudo -n /usr/local/libexec/debian-user-config/copilot-setup-vsock 2>/dev/null || true
-    if [[ ! -c /dev/vsock ]]; then
-        echo "error: host vsock device is unavailable: /dev/vsock" >&2
-        exit 1
-    fi
     VSOCK_DEVICE_BIND_ARGS=(--dev-bind /dev/vsock /dev/vsock)
 fi
 
+e2e_libvirt_virsh() {
+    env \
+        HOME="$E2E_LIBVIRT_HOME" \
+        XDG_RUNTIME_DIR="$E2E_LIBVIRT_RUNTIME_DIR" \
+        XDG_CONFIG_HOME="$E2E_LIBVIRT_CONFIG_HOME" \
+        XDG_CACHE_HOME="$E2E_LIBVIRT_CACHE_HOME" \
+        XDG_DATA_HOME="$E2E_LIBVIRT_DATA_HOME" \
+        /usr/bin/virsh -c qemu:///session "$@"
+}
+
+systemd_user() {
+    env XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" /usr/bin/systemctl --user "$@"
+}
+
+cleanup_e2e_libvirt() {
+    if [[ -S "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock" ]]; then
+        local domain
+        local -a running_domains=()
+        while IFS= read -r domain; do
+            if [[ -n "$domain" ]]; then
+                running_domains+=("$domain")
+            fi
+        done < <(e2e_libvirt_virsh list --state-running --name 2>/dev/null || true)
+
+        for domain in "${running_domains[@]}"; do
+            if ! e2e_libvirt_virsh destroy "$domain" >/dev/null 2>&1; then
+                echo "warning: could not stop E2E VM during cleanup: $domain" >&2
+            fi
+        done
+    fi
+
+    if [[ -n "$E2E_LIBVIRT_UNIT" ]]; then
+        if systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT.scope" &&
+            ! systemd_user stop "$E2E_LIBVIRT_UNIT.scope" >/dev/null 2>&1; then
+            echo "warning: could not stop the private E2E libvirt scope" >&2
+        fi
+    fi
+    if [[ -n "$E2E_LIBVIRT_SCOPE_PID" ]]; then
+        wait "$E2E_LIBVIRT_SCOPE_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$E2E_LIBVIRT_RUNTIME_DIR" &&
+        "$E2E_LIBVIRT_RUNTIME_DIR" == "$HOST_XDG_RUNTIME_DIR"/copilot-e2e-libvirt.* ]]; then
+        rm -rf -- "$E2E_LIBVIRT_RUNTIME_DIR"
+    fi
+}
+
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    "$SCRIPT_DIR/copilot-e2e-sudo-helper" \
-        "$E2E_SUDO_SOCKET" \
-        "$AUTHD_E2E_DATA_DIR" \
-        "${E2E_SUDO_ALLOWED_IMAGE_ROOTS[@]}" &
-    E2E_SUDO_HELPER_PID=$!
-    E2E_SUDO_HELPER_READY=false
+    trap cleanup_e2e_libvirt EXIT
+
+    E2E_LIBVIRT_UNIT="copilot-e2e-libvirt-${USER_ID}-$$-${RANDOM}"
+    printf -v E2E_LIBVIRT_START_COMMAND \
+        'cd %q && exec /usr/bin/systemd-run --user --scope --unit=%q --collect --quiet -- %q' \
+        "$E2E_LIBVIRT_RUNTIME_DIR" \
+        "$E2E_LIBVIRT_UNIT" \
+        "$E2E_LIBVIRT_LAUNCHER"
+
+    env -i \
+        HOME="$HOME" \
+        USER="$(id -un)" \
+        LOGNAME="$(id -un)" \
+        PATH=/usr/bin:/usr/sbin:/bin:/sbin \
+        COPILOT_E2E_LIBVIRT_UID="$USER_ID" \
+        COPILOT_E2E_LIBVIRT_KVM_GID="$E2E_LIBVIRT_KVM_GID" \
+        COPILOT_E2E_LIBVIRT_RUNTIME_DIR="$E2E_LIBVIRT_RUNTIME_DIR" \
+        COPILOT_E2E_LIBVIRT_CONFIG_HOME="$E2E_LIBVIRT_CONFIG_HOME" \
+        COPILOT_E2E_LIBVIRT_CACHE_HOME="$E2E_LIBVIRT_CACHE_HOME" \
+        COPILOT_E2E_LIBVIRT_DATA_HOME="$E2E_LIBVIRT_DATA_HOME" \
+        COPILOT_E2E_LIBVIRT_HOME="$E2E_LIBVIRT_HOME" \
+        AUTHD_E2E_DATA_DIR="$AUTHD_E2E_DATA_HOST_DIR" \
+        XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" \
+        /usr/bin/newgrp -c "$E2E_LIBVIRT_START_COMMAND" kvm \
+        >"$E2E_LIBVIRT_LOG" 2>&1 &
+    E2E_LIBVIRT_SCOPE_PID=$!
+
+    E2E_LIBVIRT_READY=false
     for ((attempt = 0; attempt < 100; attempt++)); do
-        if ! kill -0 "$E2E_SUDO_HELPER_PID" 2>/dev/null; then
+        if [[ -S "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock" ]] &&
+            e2e_libvirt_virsh list --all >/dev/null 2>&1; then
+            E2E_LIBVIRT_READY=true
             break
         fi
-        if [[ -S "$E2E_SUDO_SOCKET" ]]; then
-            E2E_SUDO_HELPER_READY=true
+        if ! ps -p "$E2E_LIBVIRT_SCOPE_PID" >/dev/null 2>&1 &&
+            ! systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT.scope"; then
             break
         fi
         sleep 0.05
     done
-    if [[ "$E2E_SUDO_HELPER_READY" != true ]]; then
-        echo "error: could not initialize the host-side E2E sudo helper" >&2
-        wait "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
+    if [[ "$E2E_LIBVIRT_READY" != true ]]; then
+        echo "error: could not initialize the AppArmor-confined E2E libvirt session" >&2
+        echo "error: install its policy with ./apparmor/install-e2e-libvirt.sh" >&2
+        if [[ -s "$E2E_LIBVIRT_LOG" ]]; then
+            cat "$E2E_LIBVIRT_LOG" >&2
+        fi
         exit 1
     fi
+
+    shopt -s nullglob
+    for domain_xml in "$AUTHD_E2E_DATA_HOST_DIR"/*/*.xml; do
+        if [[ -f "$domain_xml" ]] &&
+            ! e2e_libvirt_virsh define "$domain_xml" >/dev/null; then
+            echo "error: could not restore E2E VM definition: $domain_xml" >&2
+            exit 1
+        fi
+    done
+    shopt -u nullglob
 fi
 
 # Keep only capabilities needed by the nested OCI runtime; they are scoped to
@@ -851,6 +1029,7 @@ bwrap \
     --dir /var/run/libvirt \
     "${AUTHD_E2E_TEST_RUNS_PARENT_ARGS[@]}" \
     "${LIBVIRT_BIND_ARGS[@]}" \
+    "${E2E_LIBVIRT_SOCKET_BIND_ARGS[@]}" \
     "${WAYLAND_SOCKET_BIND_ARGS[@]}" \
     "${SSH_AGENT_BIND_ARGS[@]}" \
     "${SSH_KNOWN_HOSTS_BIND_ARGS[@]}" \

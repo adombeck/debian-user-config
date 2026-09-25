@@ -1,80 +1,86 @@
 #!/usr/bin/env python3
 
-import json
 import os
-import socket
-import struct
+import stat
 import sys
-import threading
 
 
-def write_all(file_descriptor, data):
-    offset = 0
-    while offset < len(data):
-        offset += os.write(file_descriptor, data[offset:])
+GUESTFISH_OPERATIONS = {
+    ("stat", "/var/lib/cloud/instance/boot-finished"),
+    ("cat", "/var/lib/cloud/data/result.json"),
+}
+REAL_VIRSH = "/usr/bin/virsh"
+REAL_GUESTFISH = "/usr/bin/guestfish"
 
 
-def forward_stdin(connection):
+def reject(message):
+    print(f"error: {message}", file=sys.stderr)
+    return 125
+
+
+def path_is_within(path, root):
     try:
-        while True:
-            data = os.read(0, 65536)
-            if not data:
-                break
-            connection.sendall(data)
-        connection.shutdown(socket.SHUT_WR)
-    except (BrokenPipeError, OSError):
-        pass
+        return os.path.commonpath((path, root)) == root
+    except ValueError:
+        return False
 
 
 def main():
-    socket_path = os.environ.get("COPILOT_E2E_SUDO_SOCKET")
-    if not socket_path:
-        print("error: COPILOT_E2E_SUDO_SOCKET is not set", file=sys.stderr)
-        return 125
+    arguments = sys.argv[1:]
+    while arguments and arguments[0] in {
+        "-E",
+        "--preserve-env",
+        "-n",
+        "--non-interactive",
+    }:
+        arguments.pop(0)
 
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    if arguments == ["-v"]:
+        return 0
+    if arguments and arguments[0] == "--":
+        arguments.pop(0)
+    if not arguments:
+        return reject("no command was provided to sudo")
+
+    command = arguments[0]
+    if command in {"virsh", REAL_VIRSH}:
+        os.execv(REAL_VIRSH, ["virsh", *arguments[1:]])
+
+    if command not in {"guestfish", REAL_GUESTFISH}:
+        return reject(
+            "the rootless E2E profile only permits local virsh and read-only "
+            "guestfish checks; host privilege escalation is unavailable"
+        )
+
+    if (
+        len(arguments) != 7
+        or arguments[1:3] != ["--ro", "-a"]
+        or arguments[4] != "-i"
+        or (arguments[5], arguments[6]) not in GUESTFISH_OPERATIONS
+    ):
+        return reject("guestfish request is not an allowlisted read-only check")
+
+    data_root = os.environ.get("AUTHD_E2E_DATA_DIR")
+    if not data_root:
+        return reject("AUTHD_E2E_DATA_DIR is not set")
+    data_root = os.path.realpath(data_root)
+    image_path = os.path.realpath(arguments[3])
+    if not path_is_within(image_path, data_root) or image_path == data_root:
+        return reject("guestfish image is outside the E2E data directory")
+    if not image_path.endswith(".qcow2"):
+        return reject("guestfish image must be a qcow2 file")
+
     try:
-        connection.connect(socket_path)
-        request = json.dumps(sys.argv[1:]).encode()
-        connection.sendall(struct.pack("!I", len(request)) + request)
+        root_stat = os.stat(data_root)
+        image_stat = os.stat(image_path, follow_symlinks=False)
+    except OSError as error:
+        return reject(f"could not inspect guestfish image: {error}")
+    if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.getuid():
+        return reject("E2E data directory is not owned by the invoking user")
+    if not stat.S_ISREG(image_stat.st_mode) or image_stat.st_uid != os.getuid():
+        return reject("guestfish image is not a regular file owned by the invoking user")
 
-        input_thread = threading.Thread(target=forward_stdin, args=(connection,), daemon=True)
-        input_thread.start()
-
-        buffer = bytearray()
-        exit_code = 125
-        while True:
-            data = connection.recv(65536)
-            if not data:
-                break
-            buffer.extend(data)
-            while len(buffer) >= 5:
-                frame_type = bytes(buffer[:1])
-                frame_size = struct.unpack("!I", buffer[1:5])[0]
-                if len(buffer) < 5 + frame_size:
-                    break
-                payload = bytes(buffer[5 : 5 + frame_size])
-                del buffer[: 5 + frame_size]
-                if frame_type == b"O":
-                    write_all(1, payload)
-                elif frame_type == b"E":
-                    write_all(2, payload)
-                elif frame_type == b"S":
-                    if len(payload) != 4:
-                        print("error: invalid sudo helper status", file=sys.stderr)
-                        return 125
-                    exit_code = struct.unpack("!i", payload)[0]
-                    return exit_code
-                else:
-                    print("error: unknown sudo helper response", file=sys.stderr)
-                    return 125
-    except (ConnectionError, OSError) as error:
-        print(f"error: could not connect to e2e sudo helper: {error}", file=sys.stderr)
-        return 125
-    finally:
-        connection.close()
-
-    return exit_code
+    os.execv(REAL_GUESTFISH, ["guestfish", *arguments[1:]])
 
 
 if __name__ == "__main__":
