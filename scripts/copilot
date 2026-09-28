@@ -719,6 +719,41 @@ else
     exit 1
 fi
 
+# Resolve this symlink before binding the release file into the sandbox.
+OS_RELEASE_PATH="$(realpath /etc/os-release)"
+if [[ ! -f "$OS_RELEASE_PATH" || ! -r "$OS_RELEASE_PATH" ]]; then
+    echo "error: os-release path is not a readable regular file: $OS_RELEASE_PATH" >&2
+    exit 1
+fi
+
+# authd tests copy these host files into nested bubblewrap sandboxes.
+AUTHD_TEST_CONFIG_BIND_ARGS=()
+AUTHD_TEST_ENV_ARGS=()
+CRACKLIB_BIND_ARGS=()
+if [[ -f "$MOUNT_DIR/go.mod" ]] &&
+    grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
+    AUTHD_TEST_ENV_ARGS=(--setenv AUTHD_SKIP_ROOT_TESTS 1)
+    for etc_path in \
+        /etc/environment \
+        /etc/login.defs \
+        /etc/pam.d \
+        /etc/security \
+        /etc/shells \
+        /etc/subgid \
+        /etc/subuid \
+        /etc/sudoers
+    do
+        if [[ -e "$etc_path" ]]; then
+            AUTHD_TEST_CONFIG_BIND_ARGS+=(--ro-bind "$(realpath "$etc_path")" "$etc_path")
+        fi
+    done
+
+    if [[ -d /var/cache/cracklib ]]; then
+        CRACKLIB_CACHE_DIR="$(realpath /var/cache/cracklib)"
+        CRACKLIB_BIND_ARGS=(--dir /var/cache --ro-bind "$CRACKLIB_CACHE_DIR" /var/cache/cracklib)
+    fi
+fi
+
 # Expose the host package database read-only so dpkg-query and
 # dpkg-checkbuilddeps can recognize packages whose files are already visible
 # under /usr. Package installation remains unavailable: apt state is not
@@ -747,7 +782,9 @@ SANDBOX_ENV_ARGS=(
     --setenv CONTAINERS_CONF /tmp/copilot-runtime/containers.conf
     --setenv CONTAINERS_STORAGE_CONF /tmp/copilot-runtime/storage.conf
     --setenv UV_PYTHON_INSTALL_DIR "$UV_PYTHON_HOME"
-    --setenv TMPDIR /tmp/copilot-runtime/tmp
+    # Keep temporary paths short enough for Unix socket path limits.
+    --setenv TMPDIR /tmp
+    "${AUTHD_TEST_ENV_ARGS[@]}"
     --setenv _CONTAINERS_USERNS_CONFIGURED "done"
     --setenv _CONTAINERS_ROOTLESS_UID "$USER_ID"
     --setenv _CONTAINERS_ROOTLESS_GID "$GROUP_ID"
@@ -1005,8 +1042,9 @@ bwrap \
     --ro-bind-try /etc/alternatives /etc/alternatives \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
     --ro-bind /etc/ssl /etc/ssl \
-    --ro-bind /etc/os-release /etc/os-release \
+    --ro-bind "$OS_RELEASE_PATH" /etc/os-release \
     --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf \
+    "${AUTHD_TEST_CONFIG_BIND_ARGS[@]}" \
     --ro-bind /etc/hosts /etc/hosts \
     "${LOCALTIME_BIND_ARGS[@]}" \
     --ro-bind-data 9 /etc/passwd \
@@ -1027,6 +1065,7 @@ bwrap \
     --dir /sys/fs \
     --dir /sys/fs/cgroup \
     "${DPKG_STATE_BIND_ARGS[@]}" \
+    "${CRACKLIB_BIND_ARGS[@]}" \
     --dir /var/run/libvirt \
     "${AUTHD_E2E_TEST_RUNS_PARENT_ARGS[@]}" \
     "${LIBVIRT_BIND_ARGS[@]}" \
@@ -1182,6 +1221,14 @@ bwrap \
                 exit 1
             fi
             export JIRA_API_TOKEN
+        fi
+
+        # A failed Git status breaks automatic VCS stamping. Single-package
+        # execution also avoids exhausting the sandbox pipe quota in Go tests.
+        if [[ -f go.mod ]] && ! /usr/bin/git status --porcelain >/dev/null 2>&1; then
+            GOFLAGS="${GOFLAGS:+$GOFLAGS }-buildvcs=false -p=1"
+            export GOFLAGS
+            echo "warning: Git status failed; disabling Go VCS stamping and limiting Go package parallelism" >&2
         fi
 
         if "$@"; then
