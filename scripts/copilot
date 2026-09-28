@@ -1005,6 +1005,7 @@ bwrap \
     --ro-bind-try /etc/alternatives /etc/alternatives \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
     --ro-bind /etc/ssl /etc/ssl \
+    --ro-bind /etc/os-release /etc/os-release \
     --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf \
     --ro-bind /etc/hosts /etc/hosts \
     "${LOCALTIME_BIND_ARGS[@]}" \
