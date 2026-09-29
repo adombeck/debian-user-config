@@ -1037,11 +1037,17 @@ fi
 # Hide the persistent policy directory with a sandbox-only tmpfs. A bwrap
 # --bind source must exist outside the sandbox, so a directory created with
 # --dir under /tmp cannot be used as that source.
+# Interactive Bash needs the caller's terminal session for job control.
+BWRAP_SESSION_ARGS=(--new-session)
+if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
+    BWRAP_SESSION_ARGS=()
+fi
+
 bwrap \
     --unshare-all \
     --share-net \
     --die-with-parent \
-    --new-session \
+    "${BWRAP_SESSION_ARGS[@]}" \
     --uid 0 \
     --gid 0 \
     --cap-add CAP_SYS_ADMIN \
@@ -1257,12 +1263,26 @@ bwrap \
         fi
 
         if [[ "${COPILOT_SANDBOX_SHELL:-}" == true ]]; then
-            if /usr/bin/bash --noprofile --norc -i; then
-                status=0
-            else
-                status=$?
-            fi
-        elif "$@"; then
+            shell_rcfile="$(mktemp /tmp/copilot-runtime/shell-rc.XXXXXXXX)"
+            chmod 600 "$shell_rcfile"
+            cat >"$shell_rcfile" <<\COPILOT_RC
+cleanup_copilot_services() {
+    local pid
+    for pid in "${COPILOT_SANDBOX_KEYRING_PID:-}" "${COPILOT_SANDBOX_DBUS_PID:-}"; do
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+}
+trap cleanup_copilot_services EXIT
+COPILOT_RC
+            export COPILOT_SANDBOX_DBUS_PID="$dbus_pid"
+            export COPILOT_SANDBOX_KEYRING_PID="$keyring_pid"
+            exec /usr/bin/bash --noprofile --rcfile "$shell_rcfile" -i
+        fi
+
+        if "$@"; then
             status=0
         else
             status=$?
