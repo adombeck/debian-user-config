@@ -30,6 +30,8 @@
 # A dedicated SSH agent socket, or the host's current SSH_AUTH_SOCK when no
 # dedicated socket exists, may be forwarded. Private keys are never mounted.
 #
+# Use --shell to open an interactive shell inside the sandbox for debugging.
+#
 # Installation from the repository root:
 #   mv ~/.local/bin/copilot ~/.local/bin/copilot.real
 #   ./scripts/install.sh
@@ -37,7 +39,7 @@
 # The first command preserves the original Copilot executable; the installer
 # then creates ~/.local/bin/copilot as a symlink to this wrapper.
 #
-# Usage: copilot [--allow-e2e-tests] [copilot args...]
+# Usage: copilot [--allow-e2e-tests] [--shell] [copilot args...]
 
 set -euo pipefail
 
@@ -49,9 +51,29 @@ fi
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 ALLOW_E2E_TESTS=false
-if [[ "${1:-}" == "--allow-e2e-tests" ]]; then
-    ALLOW_E2E_TESTS=true
-    shift
+RUN_INTERACTIVE_SHELL=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --allow-e2e-tests)
+        ALLOW_E2E_TESTS=true
+        shift
+        ;;
+    --shell)
+        RUN_INTERACTIVE_SHELL=true
+        shift
+        ;;
+    *)
+        break
+        ;;
+    esac
+done
+
+if [[ "$RUN_INTERACTIVE_SHELL" == true && $# -gt 0 ]]; then
+    echo "error: --shell cannot be combined with Copilot arguments" >&2
+    exit 2
+fi
+
+if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     cat >&2 <<'EOF'
 warning: --allow-e2e-tests starts an AppArmor-confined, per-user libvirt session
 warning: it does not expose the host's system libvirt socket or grant host root
@@ -790,6 +812,9 @@ SANDBOX_ENV_ARGS=(
     --setenv _CONTAINERS_ROOTLESS_GID "$GROUP_ID"
     --setenv PATH "$SANDBOX_PATH"
 )
+if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
+    SANDBOX_ENV_ARGS+=(--setenv COPILOT_SANDBOX_SHELL true)
+fi
 if [[ -n "${TERM:-}" ]]; then
     SANDBOX_ENV_ARGS+=(--setenv TERM "$TERM")
 fi
@@ -1231,7 +1256,13 @@ bwrap \
             echo "warning: Git status failed; disabling Go VCS stamping and limiting Go package parallelism" >&2
         fi
 
-        if "$@"; then
+        if [[ "${COPILOT_SANDBOX_SHELL:-}" == true ]]; then
+            if /usr/bin/bash --noprofile --norc -i; then
+                status=0
+            else
+                status=$?
+            fi
+        elif "$@"; then
             status=0
         else
             status=$?
