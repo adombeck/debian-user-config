@@ -26,7 +26,8 @@ GITHUB_AUTHD_CI_JOB_URL_REGEX = re.compile(
     r'https://github\.com/canonical/authd/actions/runs/\d+/job/\d+(?:\?.*)?')
 AUTHD_E2E_TEST_LOG_URL_REGEX = re.compile(
     r'https://authd-e2e-test-logs\.adrian-dombeck\.workers\.dev/'
-    r'pr-\d+/run-\d+-\d+/[^/?#]+/log\.html')
+    r'(?:pr-\d+/run-\d+-\d+|[a-z][a-z0-9_-]*-(?P<event_run_id>\d+)/'
+    r'run-(?P=event_run_id)-\d+)/[^/?#]+/log\.html')
 GITHUB_CANONICAL_ISSUE_REGEX = re.compile(r'https://github\.com/canonical/[^/]+/issues/\d+')
 JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d+')
 JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
