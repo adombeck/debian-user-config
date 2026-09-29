@@ -92,8 +92,10 @@ class IntelliJ(Editor):
 EDITOR = IntelliJ()
 
 
-def notify(title, body, copy_text=None, copy_label="Copy"):
-    if NOTIFICATION_ID_FILE.exists():
+def notify(title, body, copy_text=None, copy_label="Copy", replace_id=None):
+    if replace_id is not None:
+        id_ = replace_id
+    elif NOTIFICATION_ID_FILE.exists():
         id_ = int(NOTIFICATION_ID_FILE.read_text().strip())
     else:
         id_ = 0
@@ -128,19 +130,67 @@ def notify(title, body, copy_text=None, copy_label="Copy"):
         notification.show()
     except gi.repository.GLib.Error as e:
         if "Invalid notification ID" in str(e):
-            # Delete the notification file and try again
-            NOTIFICATION_ID_FILE.unlink()
-            notify(title, body, copy_text=copy_text, copy_label=copy_label)
-            return
+            if replace_id is not None:
+                if NOTIFICATION_ID_FILE.exists() and int(
+                    NOTIFICATION_ID_FILE.read_text().strip()
+                ) == replace_id:
+                    NOTIFICATION_ID_FILE.unlink()
+            elif NOTIFICATION_ID_FILE.exists():
+                NOTIFICATION_ID_FILE.unlink()
+            return notify(title, body, copy_text=copy_text, copy_label=copy_label)
         raise
 
-    Path(NOTIFICATION_ID_FILE).write_text(str(notification.props.id))
+    if replace_id is None:
+        Path(NOTIFICATION_ID_FILE).write_text(str(notification.props.id))
 
     if loop is not None:
         # Keep the main loop running so the action button works, but don't hang
         # forever if the user never interacts with the notification.
         GLib.timeout_add_seconds(60, loop.quit)
         loop.run()
+
+    return notification.props.id
+
+
+def run_command_with_error_notification(
+    command, notification_title, notification_body, failure_title, cwd=None
+):
+    notification_id = notify(notification_title, notification_body)
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except OSError as error:
+        print(error, file=sys.stderr)
+        notify(failure_title, str(error), replace_id=notification_id)
+        return 1
+
+    if result.stdout:
+        print(result.stdout, end="")
+
+    if result.returncode == 0:
+        return 0
+
+    output = result.stdout.strip()
+    if output:
+        lines = output.splitlines()
+        if len(lines) > 12:
+            lines = lines[:3] + ["..."] + lines[-8:]
+        output = "\n".join(lines)
+        if len(output) > 1000:
+            output = output[:500] + "\n...\n" + output[-495:]
+    else:
+        output = f"Command exited with status {result.returncode}."
+    notify(
+        failure_title,
+        f"Exit status: {result.returncode}\n{output}",
+        replace_id=notification_id,
+    )
+    return result.returncode
 
 
 def notify_claim_result(result, clipboard_content):
@@ -185,8 +235,12 @@ def main():
     # If the clipboard content is a hosted authd e2e-test log URL, start a
     # Copilot session to debug the failed test.
     if AUTHD_E2E_TEST_LOG_URL_REGEX.fullmatch(clipboard_content) and DEBUG_CI_E2E_TEST_SCRIPT.exists():
-        notify("Debugging authd e2e-test", clipboard_content)
-        subprocess.Popen([str(DEBUG_CI_E2E_TEST_SCRIPT), clipboard_content])
+        run_command_with_error_notification(
+            [str(DEBUG_CI_E2E_TEST_SCRIPT), clipboard_content],
+            "Debugging authd e2e-test",
+            clipboard_content,
+            "Failed to debug authd e2e-test",
+        )
         return
 
     if GITHUB_RUN_ID_REGEX.match(clipboard_content):
@@ -205,8 +259,12 @@ def main():
     # If the clipboard content is an authd GitHub Actions job URL, create a
     # worktree for its PR and start a Copilot session to debug the failure.
     if GITHUB_AUTHD_CI_JOB_URL_REGEX.fullmatch(clipboard_content) and DEBUG_CI_JOB_SCRIPT.exists():
-        notify("Debugging authd CI job", clipboard_content)
-        subprocess.Popen([str(DEBUG_CI_JOB_SCRIPT), clipboard_content])
+        run_command_with_error_notification(
+            [str(DEBUG_CI_JOB_SCRIPT), clipboard_content],
+            "Debugging authd CI job",
+            clipboard_content,
+            "Failed to debug authd CI job",
+        )
         return
 
     # If the clipboard content is a GitHub issue URL for a canonical repo,
@@ -226,8 +284,12 @@ def main():
     # If the clipboard content is a URL to a GitHub PR review comment or a
     # PR issue comment, call address-review-comment
     if GITHUB_REVIEW_COMMENT_URL_REGEX.match(clipboard_content) and ADDRESS_REVIEW_COMMENT_SCRIPT.exists():
-        notify("Addressing GitHub review comment", clipboard_content)
-        subprocess.Popen([str(ADDRESS_REVIEW_COMMENT_SCRIPT), clipboard_content])
+        run_command_with_error_notification(
+            [str(ADDRESS_REVIEW_COMMENT_SCRIPT), clipboard_content],
+            "Addressing GitHub review comment",
+            clipboard_content,
+            "Failed to address GitHub review comment",
+        )
         return
 
     # If the clipboard content is a Jira issue URL, call jira-claim-issue
@@ -264,11 +326,14 @@ def main():
         if result.returncode == 0 and result.stdout.strip():
             worktree_dirname = clipboard_content.replace('/', '-')
             worktree_path = AUTHD_REPO.parent / f"authd-{worktree_dirname}"
-            notify("Setting up authd worktree", f"Branch: {clipboard_content}")
-            subprocess.run(
+            if run_command_with_error_notification(
                 ["authd-worktree", clipboard_content],
+                "Setting up authd worktree",
+                f"Branch: {clipboard_content}",
+                "Failed to set up authd worktree",
                 cwd=AUTHD_REPO,
-            )
+            ) != 0:
+                return
             if ALT:
                 subprocess.Popen(["idea", str(worktree_path)])
             else:
@@ -314,10 +379,14 @@ def main():
                     notify("Failed to fetch branch",
                            fetch_result.stderr.strip() or clipboard_content)
                     return
-                subprocess.run(
+                if run_command_with_error_notification(
                     ["authd-worktree", branch],
+                    "Setting up authd worktree",
+                    f"Remote: {remote}, branch: {branch}",
+                    "Failed to set up authd worktree",
                     cwd=AUTHD_REPO,
-                )
+                ) != 0:
+                    return
                 if ALT:
                     subprocess.Popen(["idea", str(worktree_path)])
                 else:
