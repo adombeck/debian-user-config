@@ -30,7 +30,7 @@
 # A dedicated SSH agent socket, or the host's current SSH_AUTH_SOCK when no
 # dedicated socket exists, may be forwarded. Private keys are never mounted.
 #
-# Use --shell to open an interactive shell inside the sandbox for debugging.
+# Use --shell to open the calling Bash or Zsh inside the sandbox for debugging.
 #
 # Installation from the repository root:
 #   mv ~/.local/bin/copilot ~/.local/bin/copilot.real
@@ -71,6 +71,43 @@ done
 if [[ "$RUN_INTERACTIVE_SHELL" == true && $# -gt 0 ]]; then
     echo "error: --shell cannot be combined with Copilot arguments" >&2
     exit 2
+fi
+
+INTERACTIVE_SHELL_PATH=
+INTERACTIVE_SHELL_KIND=
+if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
+    PARENT_SHELL_PATH="$(readlink -f "/proc/$PPID/exe" 2>/dev/null || true)"
+    for shell_candidate in "$PARENT_SHELL_PATH" "${SHELL:-}"; do
+        [[ -n "$shell_candidate" ]] || continue
+        if [[ "$shell_candidate" != /* ]]; then
+            shell_candidate="$(command -v "$shell_candidate" 2>/dev/null || true)"
+        fi
+        [[ -n "$shell_candidate" ]] || continue
+
+        shell_kind="${shell_candidate##*/}"
+        case "$shell_kind" in
+        bash|zsh)
+            ;;
+        *)
+            continue
+            ;;
+        esac
+
+        resolved_shell="$(realpath -e "$shell_candidate" 2>/dev/null || true)"
+        [[ -n "$resolved_shell" && -x "$resolved_shell" ]] || continue
+        case "$resolved_shell" in
+        /bin/*|/usr/*|/snap/*|"$HOME"/.local/bin/*)
+            INTERACTIVE_SHELL_PATH="$resolved_shell"
+            INTERACTIVE_SHELL_KIND="$shell_kind"
+            break
+            ;;
+        esac
+    done
+
+    if [[ -z "$INTERACTIVE_SHELL_PATH" ]]; then
+        echo "error: --shell could not find an accessible Bash or Zsh executable" >&2
+        exit 1
+    fi
 fi
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
@@ -813,7 +850,11 @@ SANDBOX_ENV_ARGS=(
     --setenv PATH "$SANDBOX_PATH"
 )
 if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
-    SANDBOX_ENV_ARGS+=(--setenv COPILOT_SANDBOX_SHELL true)
+    SANDBOX_ENV_ARGS+=(
+        --setenv COPILOT_SANDBOX_SHELL true
+        --setenv COPILOT_SANDBOX_SHELL_PATH "$INTERACTIVE_SHELL_PATH"
+        --setenv COPILOT_SANDBOX_SHELL_KIND "$INTERACTIVE_SHELL_KIND"
+    )
 fi
 if [[ -n "${TERM:-}" ]]; then
     SANDBOX_ENV_ARGS+=(--setenv TERM "$TERM")
@@ -1037,7 +1078,7 @@ fi
 # Hide the persistent policy directory with a sandbox-only tmpfs. A bwrap
 # --bind source must exist outside the sandbox, so a directory created with
 # --dir under /tmp cannot be used as that source.
-# Interactive Bash needs the caller's terminal session for job control.
+# Interactive shells need the caller's terminal session for job control.
 BWRAP_SESSION_ARGS=(--new-session)
 if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
     BWRAP_SESSION_ARGS=()
@@ -1263,8 +1304,20 @@ bwrap \
         fi
 
         if [[ "${COPILOT_SANDBOX_SHELL:-}" == true ]]; then
-            shell_rcfile="$(mktemp /tmp/copilot-runtime/shell-rc.XXXXXXXX)"
-            chmod 600 "$shell_rcfile"
+            shell_rc_dir="$(mktemp -d /tmp/copilot-runtime/shell-rc.XXXXXXXX)"
+            chmod 700 "$shell_rc_dir"
+            case "$COPILOT_SANDBOX_SHELL_KIND" in
+            bash)
+                shell_rcfile="$shell_rc_dir/bashrc"
+                ;;
+            zsh)
+                shell_rcfile="$shell_rc_dir/.zshrc"
+                ;;
+            *)
+                echo "error: unsupported interactive shell: $COPILOT_SANDBOX_SHELL_KIND" >&2
+                exit 1
+                ;;
+            esac
             cat >"$shell_rcfile" <<\COPILOT_RC
 cleanup_copilot_services() {
     local pid
@@ -1277,9 +1330,18 @@ cleanup_copilot_services() {
 }
 trap cleanup_copilot_services EXIT
 COPILOT_RC
+            chmod 600 "$shell_rcfile"
             export COPILOT_SANDBOX_DBUS_PID="$dbus_pid"
             export COPILOT_SANDBOX_KEYRING_PID="$keyring_pid"
-            exec /usr/bin/bash --noprofile --rcfile "$shell_rcfile" -i
+            case "$COPILOT_SANDBOX_SHELL_KIND" in
+            bash)
+                exec "$COPILOT_SANDBOX_SHELL_PATH" --noprofile --rcfile "$shell_rcfile" -i
+                ;;
+            zsh)
+                export ZDOTDIR="$shell_rc_dir"
+                exec "$COPILOT_SANDBOX_SHELL_PATH" -i
+                ;;
+            esac
         fi
 
         if "$@"; then
