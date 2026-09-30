@@ -788,10 +788,13 @@ fi
 # authd tests copy these host files into nested bubblewrap sandboxes.
 AUTHD_TEST_CONFIG_BIND_ARGS=()
 AUTHD_TEST_ENV_ARGS=()
+AUTHD_TEST_CAP_ARGS=()
 CRACKLIB_BIND_ARGS=()
 if [[ -f "$MOUNT_DIR/go.mod" ]] &&
     grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
     AUTHD_TEST_ENV_ARGS=(--setenv AUTHD_SKIP_ROOT_TESTS 1)
+    # Nested authd tests need this capability to map UID 0.
+    AUTHD_TEST_CAP_ARGS=(--cap-add CAP_SETFCAP)
     for etc_path in \
         /etc/environment \
         /etc/login.defs \
@@ -806,6 +809,15 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
             AUTHD_TEST_CONFIG_BIND_ARGS+=(--ro-bind "$(realpath "$etc_path")" "$etc_path")
         fi
     done
+
+    if [[ -d /etc/skel ]]; then
+        AUTHD_TEST_CONFIG_BIND_ARGS+=(--dir /etc/skel)
+        for skel_file in /etc/skel/.bashrc /etc/skel/.profile; do
+            if [[ -f "$skel_file" ]]; then
+                AUTHD_TEST_CONFIG_BIND_ARGS+=(--ro-bind "$(realpath "$skel_file")" "$skel_file")
+            fi
+        done
+    fi
 
     if [[ -d /var/cache/cracklib ]]; then
         CRACKLIB_CACHE_DIR="$(realpath /var/cache/cracklib)"
@@ -1098,6 +1110,7 @@ bwrap \
     --cap-add CAP_SETGID \
     --cap-add CAP_SETPCAP \
     --cap-add CAP_MKNOD \
+    "${AUTHD_TEST_CAP_ARGS[@]}" \
     "${SANDBOX_ENV_ARGS[@]}" \
     \
     --ro-bind /usr /usr \
