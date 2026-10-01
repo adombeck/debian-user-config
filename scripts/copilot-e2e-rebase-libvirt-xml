@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import stat
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+
+
+def fail(message):
+    print(f"error: {message}", file=sys.stderr)
+    return 1
+
+
+def raise_walk_error(error):
+    raise error
+
+
+def main():
+    if len(sys.argv) != 4:
+        print(
+            f"usage: {sys.argv[0]} QEMU_CONFIG_DIR HOST_RUNTIME_DIR SOCKET_DIR",
+            file=sys.stderr,
+        )
+        return 2
+
+    config_dir = os.path.realpath(sys.argv[1])
+    runtime_dir_argument = os.path.abspath(sys.argv[2])
+    runtime_dir = os.path.realpath(runtime_dir_argument)
+    socket_dir = os.path.realpath(sys.argv[3])
+    if not os.path.isdir(config_dir):
+        return fail(f"E2E libvirt QEMU config directory is missing: {config_dir}")
+    if not os.path.isdir(runtime_dir):
+        return fail(f"host runtime directory is missing: {runtime_dir}")
+    if not os.path.isdir(socket_dir):
+        return fail(f"E2E libvirt socket directory is missing: {socket_dir}")
+    if os.path.commonpath((runtime_dir, socket_dir)) != runtime_dir:
+        return fail("E2E libvirt socket directory is outside the host runtime directory")
+
+    runtime_roots = {
+        runtime_dir_argument,
+        runtime_dir,
+        os.path.realpath(f"/run/user/{os.getuid()}"),
+    }
+    runtime_patterns = [
+        re.compile(
+            re.escape(os.path.join(root, "copilot-e2e-libvirt."))
+            + r"[^/]+/libvirt/(?P<relative>.+)"
+        )
+        for root in runtime_roots
+    ]
+    updated = 0
+    domain_xml_files = []
+
+    try:
+        for root, directories, filenames in os.walk(
+            config_dir, followlinks=False, onerror=raise_walk_error
+        ):
+            for directory in directories:
+                directory_path = os.path.join(root, directory)
+                if os.path.islink(directory_path):
+                    return fail(
+                        f"refusing to follow symlinked E2E libvirt directory: {directory_path}"
+                    )
+            directories.sort()
+            for filename in sorted(filenames):
+                if not filename.endswith(".xml"):
+                    continue
+                domain_xml = os.path.join(root, filename)
+                if os.path.islink(domain_xml) or not os.path.isfile(domain_xml):
+                    return fail(
+                        f"refusing to update non-regular E2E domain XML: {domain_xml}"
+                    )
+                domain_xml_files.append(domain_xml)
+    except OSError as error:
+        return fail(f"could not list E2E libvirt domain XML files: {error}")
+
+    for domain_xml in domain_xml_files:
+        try:
+            file_stat = os.stat(domain_xml, follow_symlinks=False)
+            tree = ET.parse(domain_xml)
+        except (OSError, ET.ParseError) as error:
+            return fail(f"could not read E2E domain XML {domain_xml}: {error}")
+
+        changed = False
+        for domain in tree.getroot().iter("domain"):
+            for channel in domain.findall("./devices/channel"):
+                target = channel.find("target")
+                if (
+                    channel.get("type") != "unix"
+                    or target is None
+                    or target.get("name") != "org.qemu.guest_agent.0"
+                ):
+                    continue
+
+                source = channel.find("source")
+                if source is None or not source.get("path"):
+                    continue
+
+                old_path = source.get("path")
+                match = None
+                for pattern in runtime_patterns:
+                    match = pattern.fullmatch(old_path)
+                    if match is not None:
+                        break
+                if match is None:
+                    continue
+
+                relative_path = match.group("relative")
+                components = relative_path.split("/")
+                if any(component in {"", ".", ".."} for component in components):
+                    return fail(f"invalid E2E guest-agent socket path in {domain_xml}")
+
+                new_path = os.path.join(socket_dir, *components)
+                if len(os.fsencode(new_path)) >= 108:
+                    return fail(f"E2E guest-agent socket path is too long: {new_path}")
+
+                socket_parent = os.path.dirname(new_path)
+                try:
+                    os.makedirs(socket_parent, mode=0o700, exist_ok=True)
+                    os.chmod(socket_parent, 0o700)
+                except OSError as error:
+                    return fail(f"could not create E2E guest-agent socket directory {socket_parent}: {error}")
+
+                if new_path != old_path:
+                    source.set("path", new_path)
+                    changed = True
+
+        if not changed:
+            continue
+
+        temporary_path = None
+        try:
+            fd, temporary_path = tempfile.mkstemp(
+                prefix=".copilot-e2e-domain.",
+                dir=os.path.dirname(domain_xml),
+            )
+            with os.fdopen(fd, "wb") as temporary_file:
+                tree.write(temporary_file, encoding="utf-8", xml_declaration=True)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            os.chmod(temporary_path, stat.S_IMODE(file_stat.st_mode))
+            os.replace(temporary_path, domain_xml)
+            updated += 1
+        except OSError as error:
+            return fail(f"could not update E2E domain XML {domain_xml}: {error}")
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+
+    if updated:
+        print(f"rebased guest-agent socket paths in {updated} E2E libvirt XML file(s)", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -97,6 +97,7 @@ profile debian-user-config-copilot-e2e-libvirt @{HOME}/.local/libexec/debian-use
     /usr/sbin/virtlogd ix,
     /usr/sbin/virtlockd ix,
     /usr/sbin/dmidecode ix,
+    /usr/lib/libvirt/libvirt_iohelper ix,
     /usr/bin/qemu-img ix,
     /usr/bin/qemu-system-x86_64 Px -> debian-user-config-copilot-e2e-qemu,
 }
@@ -152,6 +153,10 @@ profile debian-user-config-copilot-e2e-qemu flags=(attach_disconnected,mediate_d
     /sys/devices/virtual/dmi/id/ rix,
     /sys/devices/virtual/dmi/id/** r,
 
+    /run/systemd/ rix,
+    /run/systemd/resolve/ rix,
+    /run/systemd/resolve/stub-resolv.conf r,
+
     /dev/ rix,
     /dev/**/ rix,
     /dev/null rw,
@@ -181,4 +186,5 @@ profile debian-user-config-copilot-e2e-qemu flags=(attach_disconnected,mediate_d
     /run/user/[0-9]*/copilot-e2e-libvirt.*/** rwkl,
 
     /usr/bin/qemu-system-x86_64 ix,
+    /usr/lib/libvirt/libvirt_iohelper ix,
 }
