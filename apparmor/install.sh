@@ -12,11 +12,14 @@ POLICY_SOURCE="$SCRIPT_DIR/debian-user-config-copilot-podman"
 E2E_LIBVIRT_POLICY_SOURCE="$SCRIPT_DIR/debian-user-config-copilot-e2e-libvirt"
 AUTHD_TEST_POLICY_SOURCE="$SCRIPT_DIR/debian-user-config-copilot-authd-tests"
 LOCAL_POLICY="/etc/apparmor.d/local/bwrap-userns-restrict"
+LOCAL_UNPRIV_BWRAP_POLICY="/etc/apparmor.d/local/unpriv_bwrap"
 INSTALLED_POLICY="/etc/apparmor.d/debian-user-config-copilot-podman"
 INSTALLED_E2E_LIBVIRT_POLICY="/etc/apparmor.d/debian-user-config-copilot-e2e-libvirt"
 INSTALLED_AUTHD_TEST_POLICY="/etc/apparmor.d/debian-user-config-copilot-authd-tests"
 TRANSITION_RULE='priority=110 @{HOME}/.local/libexec/debian-user-config/copilot-podman Px -> debian-user-config-copilot-podman,'
 AUTHD_TEST_TRANSITION_RULE='priority=110 @{HOME}/projects/authd*/.authd-test-tmp.*/go-build*/b*/*.test Px -> debian-user-config-copilot-authd-tests,'
+AUTHD_TEST_TRANSITION_BEGIN='# BEGIN debian-user-config authd test profile transition'
+AUTHD_TEST_TRANSITION_END='# END debian-user-config authd test profile transition'
 
 for source in "$POLICY_SOURCE" "$E2E_LIBVIRT_POLICY_SOURCE" "$AUTHD_TEST_POLICY_SOURCE"; do
     if [[ ! -r "$source" ]]; then
@@ -62,13 +65,24 @@ if ! run_root grep -Fq -- "$TRANSITION_RULE" "$LOCAL_POLICY" 2>/dev/null; then
     } | run_root tee -a "$LOCAL_POLICY" >/dev/null
 fi
 
-if ! run_root grep -Fq -- "$AUTHD_TEST_TRANSITION_RULE" "$LOCAL_POLICY" 2>/dev/null; then
-    {
-        printf '\n# BEGIN debian-user-config authd test profile transition\n'
-        printf '%s\n' "$AUTHD_TEST_TRANSITION_RULE"
-        printf '# END debian-user-config authd test profile transition\n'
-    } | run_root tee -a "$LOCAL_POLICY" >/dev/null
-fi
+remove_stale_authd_test_transition() {
+    local policy_file="$1"
+    if run_root grep -Fq -- "$AUTHD_TEST_TRANSITION_BEGIN" "$policy_file" 2>/dev/null; then
+        if ! run_root grep -Fq -- "$AUTHD_TEST_TRANSITION_END" "$policy_file" 2>/dev/null ||
+            ! run_root sed -n \
+                -e "/^${AUTHD_TEST_TRANSITION_BEGIN}$/,/^${AUTHD_TEST_TRANSITION_END}$/p" \
+                "$policy_file" | grep -Fxq -- "$AUTHD_TEST_TRANSITION_RULE"; then
+            echo "error: refusing to remove an incomplete authd test profile block from $policy_file" >&2
+            exit 1
+        fi
+        run_root sed -i \
+            -e "/^${AUTHD_TEST_TRANSITION_BEGIN}$/,/^${AUTHD_TEST_TRANSITION_END}$/d" \
+            "$policy_file"
+    fi
+}
+
+remove_stale_authd_test_transition "$LOCAL_POLICY"
+remove_stale_authd_test_transition "$LOCAL_UNPRIV_BWRAP_POLICY"
 
 run_root apparmor_parser -r "$INSTALLED_POLICY"
 run_root apparmor_parser -r "$INSTALLED_E2E_LIBVIRT_POLICY"

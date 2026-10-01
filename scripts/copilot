@@ -21,7 +21,8 @@
 # legacy scoped sudo helpers, if previously installed, with ./sudoers/uninstall.sh.
 #
 # On Ubuntu systems with bwrap-userns-restrict, install the scoped AppArmor
-# transition once with: ./apparmor/install.sh
+# transitions once with: ./apparmor/install.sh. It also enables nested
+# bubblewrap only for authd worktree sessions.
 #
 # Copilot runs with a private D-Bus session and GNOME Keyring. Only its
 # dedicated keyring data under COPILOT_HOME is persisted; the host session bus,
@@ -787,23 +788,59 @@ if [[ ! -f "$OS_RELEASE_PATH" || ! -r "$OS_RELEASE_PATH" ]]; then
 fi
 
 # authd tests copy these host files into nested bubblewrap sandboxes.
-# Their Go test binaries use the scoped AppArmor profile through GOTMPDIR.
+# Nested tests inherit the scoped AppArmor profile from the authd-only bwrap.
 AUTHD_TEST_EXTENDED_USERNS=false
-AUTHD_TEST_GOTMPDIR=
+AUTHD_TEST_BWRAP_BIN=
+AUTHD_TEST_BWRAP_BIND_ARGS=()
 AUTHD_TEST_CONFIG_BIND_ARGS=()
 AUTHD_TEST_ENV_ARGS=()
 AUTHD_TEST_CAP_ARGS=()
-AUTHD_TEST_GOTMPDIR_ARGS=()
 CRACKLIB_BIND_ARGS=()
 if [[ -f "$MOUNT_DIR/go.mod" ]] &&
     grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
     AUTHD_TEST_ENV_ARGS=(--setenv AUTHD_SKIP_ROOT_TESTS 1)
     if /usr/bin/unshare --user --map-root-user --map-users=auto --map-groups=auto -- /usr/bin/true >/dev/null 2>&1; then
         AUTHD_TEST_EXTENDED_USERNS=true
-        AUTHD_TEST_GOTMPDIR="$(mktemp -d "$MOUNT_DIR/.authd-test-tmp.XXXXXXXX")"
-        chmod 700 "$AUTHD_TEST_GOTMPDIR"
-        AUTHD_TEST_GOTMPDIR_ARGS=(--tmpfs "$AUTHD_TEST_GOTMPDIR")
-        AUTHD_TEST_ENV_ARGS+=(--setenv GOTMPDIR "$AUTHD_TEST_GOTMPDIR")
+        AUTHD_TEST_POLICY_FILE=/etc/apparmor.d/debian-user-config-copilot-authd-tests
+        if [[ ! -r "$AUTHD_TEST_POLICY_FILE" ]] ||
+            ! grep -Fq '@{HOME}/.local/libexec/debian-user-config/copilot-authd-tests-bwrap' "$AUTHD_TEST_POLICY_FILE"; then
+            echo "error: install the authd test AppArmor profile with sudo $SCRIPT_DIR/../apparmor/install.sh" >&2
+            exit 1
+        fi
+        if [[ -L "$PODMAN_BIN_DIR" ]]; then
+            echo "error: refusing to use symlinked authd test launcher directory: $PODMAN_BIN_DIR" >&2
+            exit 1
+        elif [[ -e "$PODMAN_BIN_DIR" && ! -d "$PODMAN_BIN_DIR" ]]; then
+            echo "error: authd test launcher path is not a directory: $PODMAN_BIN_DIR" >&2
+            exit 1
+        fi
+        mkdir -p "$PODMAN_BIN_DIR"
+        chmod 700 "$PODMAN_BIN_DIR"
+        AUTHD_TEST_BWRAP_BIN="$PODMAN_BIN_DIR/copilot-authd-tests-bwrap"
+        BWRAP_SOURCE="$(realpath "$BWRAP_BIN")"
+        if [[ ! -f "$BWRAP_SOURCE" || ! -x "$BWRAP_SOURCE" ]]; then
+            echo "error: bubblewrap is not a readable regular executable: $BWRAP_SOURCE" >&2
+            exit 1
+        fi
+        if [[ -L "$AUTHD_TEST_BWRAP_BIN" ]]; then
+            echo "error: refusing to use a symlinked authd test launcher: $AUTHD_TEST_BWRAP_BIN" >&2
+            exit 1
+        elif [[ -e "$AUTHD_TEST_BWRAP_BIN" && ! -f "$AUTHD_TEST_BWRAP_BIN" ]]; then
+            echo "error: authd test launcher is not a regular file: $AUTHD_TEST_BWRAP_BIN" >&2
+            exit 1
+        fi
+        if [[ "$BWRAP_SOURCE" != "$AUTHD_TEST_BWRAP_BIN" ]] &&
+            { [[ ! -e "$AUTHD_TEST_BWRAP_BIN" ]] || ! cmp -s "$BWRAP_SOURCE" "$AUTHD_TEST_BWRAP_BIN"; }; then
+            AUTHD_TEST_BWRAP_TEMP="$(mktemp "$PODMAN_BIN_DIR/.copilot-authd-tests-bwrap.XXXXXX")"
+            cp "$BWRAP_SOURCE" "$AUTHD_TEST_BWRAP_TEMP"
+            chmod 755 "$AUTHD_TEST_BWRAP_TEMP"
+            mv -f "$AUTHD_TEST_BWRAP_TEMP" "$AUTHD_TEST_BWRAP_BIN"
+        fi
+        PODMAN_BIN_DIR="$(realpath "$PODMAN_BIN_DIR")"
+        AUTHD_TEST_BWRAP_BIN="$(realpath "$AUTHD_TEST_BWRAP_BIN")"
+        if [[ "${#PODMAN_BIND_ARGS[@]}" -eq 0 ]]; then
+            AUTHD_TEST_BWRAP_BIND_ARGS=(--ro-bind "$PODMAN_BIN_DIR" "$PODMAN_BIN_DIR")
+        fi
         AUTHD_TEST_CAP_ARGS=(
             --cap-add CAP_CHOWN
             --cap-add CAP_DAC_OVERRIDE
@@ -857,19 +894,6 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
         CRACKLIB_CACHE_DIR="$(realpath /var/cache/cracklib)"
         CRACKLIB_BIND_ARGS=(--dir /var/cache --ro-bind "$CRACKLIB_CACHE_DIR" /var/cache/cracklib)
     fi
-fi
-
-cleanup_authd_test_tmpdir() {
-    if [[ -n "$AUTHD_TEST_GOTMPDIR" &&
-        "$AUTHD_TEST_GOTMPDIR" == "$MOUNT_DIR"/.authd-test-tmp.* &&
-        -d "$AUTHD_TEST_GOTMPDIR" && ! -L "$AUTHD_TEST_GOTMPDIR" ]]; then
-        if ! rmdir -- "$AUTHD_TEST_GOTMPDIR"; then
-            echo "warning: leaving non-empty authd Go temporary directory: $AUTHD_TEST_GOTMPDIR" >&2
-        fi
-    fi
-}
-if [[ -n "$AUTHD_TEST_GOTMPDIR" ]]; then
-    trap cleanup_authd_test_tmpdir EXIT
 fi
 
 # Expose the host package database read-only so dpkg-query and
@@ -1072,7 +1096,7 @@ cleanup_e2e_libvirt() {
 }
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    trap 'cleanup_e2e_libvirt; cleanup_authd_test_tmpdir' EXIT
+    trap cleanup_e2e_libvirt EXIT
 
     E2E_LIBVIRT_UNIT="copilot-e2e-libvirt-${USER_ID}-$$-${RANDOM}"
     printf -v E2E_LIBVIRT_START_COMMAND \
@@ -1154,7 +1178,7 @@ if [[ "$AUTHD_TEST_EXTENDED_USERNS" == true ]]; then
         --map-users=auto
         --map-groups=auto
         --
-        "$BWRAP_BIN"
+        "$AUTHD_TEST_BWRAP_BIN"
     )
     BWRAP_NAMESPACE_ARGS=(
         --unshare-ipc
@@ -1187,6 +1211,7 @@ fi
     --ro-bind-try /snap /snap \
     "${SHARED_CACHE_OVERLAY_PARENT_ARGS[@]}" \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
+    "${AUTHD_TEST_BWRAP_BIND_ARGS[@]}" \
     "${UV_HOST_PYTHON_BIND_ARGS[@]}" \
     "${PODMAN_BIND_ARGS[@]}" \
     "${CARGO_BIN_BIND_ARGS[@]}" \
@@ -1228,7 +1253,6 @@ fi
     \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
-    "${AUTHD_TEST_GOTMPDIR_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
     "${SHARED_CACHE_OVERLAY_ARGS[@]}" \
     "${E2E_SUDO_CLIENT_BIND_ARGS[@]}" \

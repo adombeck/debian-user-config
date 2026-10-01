@@ -2,8 +2,9 @@ abi <abi/4.0>,
 
 include <tunables/global>
 
-# This profile is entered only by authd Go tests and remains inside their rootless namespace.
-profile debian-user-config-copilot-authd-tests flags=(attach_disconnected,mediate_deleted) {
+# This profile is used only by the authd-worktree sandbox bwrap launcher.
+# Its added capabilities remain inside that launcher's rootless user namespace.
+profile debian-user-config-copilot-authd-tests @{HOME}/.local/libexec/debian-user-config/copilot-authd-tests-bwrap flags=(attach_disconnected,mediate_deleted) {
     capability chown,
     capability dac_override,
     capability fowner,
