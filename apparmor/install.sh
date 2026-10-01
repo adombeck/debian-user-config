@@ -10,12 +10,15 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POLICY_SOURCE="$SCRIPT_DIR/debian-user-config-copilot-podman"
 E2E_LIBVIRT_POLICY_SOURCE="$SCRIPT_DIR/debian-user-config-copilot-e2e-libvirt"
+AUTHD_TEST_POLICY_SOURCE="$SCRIPT_DIR/debian-user-config-copilot-authd-tests"
 LOCAL_POLICY="/etc/apparmor.d/local/bwrap-userns-restrict"
 INSTALLED_POLICY="/etc/apparmor.d/debian-user-config-copilot-podman"
 INSTALLED_E2E_LIBVIRT_POLICY="/etc/apparmor.d/debian-user-config-copilot-e2e-libvirt"
+INSTALLED_AUTHD_TEST_POLICY="/etc/apparmor.d/debian-user-config-copilot-authd-tests"
 TRANSITION_RULE='priority=110 @{HOME}/.local/libexec/debian-user-config/copilot-podman Px -> debian-user-config-copilot-podman,'
+AUTHD_TEST_TRANSITION_RULE='priority=110 @{HOME}/projects/authd*/.authd-test-tmp.*/go-build*/b*/*.test Px -> debian-user-config-copilot-authd-tests,'
 
-for source in "$POLICY_SOURCE" "$E2E_LIBVIRT_POLICY_SOURCE"; do
+for source in "$POLICY_SOURCE" "$E2E_LIBVIRT_POLICY_SOURCE" "$AUTHD_TEST_POLICY_SOURCE"; do
     if [[ ! -r "$source" ]]; then
         echo "error: AppArmor policy source not found: $source" >&2
         exit 1
@@ -49,6 +52,7 @@ run_root() {
 run_root install -d -m 0755 /etc/apparmor.d/local
 run_root install -m 0644 "$POLICY_SOURCE" "$INSTALLED_POLICY"
 run_root install -m 0644 "$E2E_LIBVIRT_POLICY_SOURCE" "$INSTALLED_E2E_LIBVIRT_POLICY"
+run_root install -m 0644 "$AUTHD_TEST_POLICY_SOURCE" "$INSTALLED_AUTHD_TEST_POLICY"
 
 if ! run_root grep -Fq -- "$TRANSITION_RULE" "$LOCAL_POLICY" 2>/dev/null; then
     {
@@ -58,8 +62,17 @@ if ! run_root grep -Fq -- "$TRANSITION_RULE" "$LOCAL_POLICY" 2>/dev/null; then
     } | run_root tee -a "$LOCAL_POLICY" >/dev/null
 fi
 
+if ! run_root grep -Fq -- "$AUTHD_TEST_TRANSITION_RULE" "$LOCAL_POLICY" 2>/dev/null; then
+    {
+        printf '\n# BEGIN debian-user-config authd test profile transition\n'
+        printf '%s\n' "$AUTHD_TEST_TRANSITION_RULE"
+        printf '# END debian-user-config authd test profile transition\n'
+    } | run_root tee -a "$LOCAL_POLICY" >/dev/null
+fi
+
 run_root apparmor_parser -r "$INSTALLED_POLICY"
 run_root apparmor_parser -r "$INSTALLED_E2E_LIBVIRT_POLICY"
+run_root apparmor_parser -r "$INSTALLED_AUTHD_TEST_POLICY"
 run_root apparmor_parser -r "$BWRAP_POLICY"
 
-echo "Installed the scoped Copilot Podman and rootless E2E libvirt AppArmor policies."
+echo "Installed the scoped Copilot Podman, E2E libvirt, and authd test AppArmor policies."

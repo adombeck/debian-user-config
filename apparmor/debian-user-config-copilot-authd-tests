@@ -1,0 +1,35 @@
+abi <abi/4.0>,
+
+include <tunables/global>
+
+# This profile is entered only by authd Go tests and remains inside their rootless namespace.
+profile debian-user-config-copilot-authd-tests flags=(attach_disconnected,mediate_deleted) {
+    capability chown,
+    capability dac_override,
+    capability fowner,
+    capability fsetid,
+    capability setuid,
+    capability setgid,
+    capability setpcap,
+    capability setfcap,
+    capability net_admin,
+    capability net_bind_service,
+    capability sys_chroot,
+    capability sys_admin,
+    capability mknod,
+
+    userns,
+    network,
+    unix,
+    mount,
+    remount,
+    umount,
+    pivot_root,
+    ptrace,
+    signal,
+
+    / r,
+    /** rwkl,
+    /** mr,
+    /** ix,
+}

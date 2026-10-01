@@ -186,6 +186,7 @@ if ! command -v bwrap >/dev/null 2>&1; then
     echo "error: bubblewrap (bwrap) not found. Install with: sudo apt install bubblewrap" >&2
     exit 1
 fi
+BWRAP_BIN="$(command -v bwrap)"
 
 for required_command in dbus-daemon dbus-send gnome-keyring-daemon getent; do
     if ! command -v "$required_command" >/dev/null 2>&1; then
@@ -786,29 +787,62 @@ if [[ ! -f "$OS_RELEASE_PATH" || ! -r "$OS_RELEASE_PATH" ]]; then
 fi
 
 # authd tests copy these host files into nested bubblewrap sandboxes.
+# Their Go test binaries use the scoped AppArmor profile through GOTMPDIR.
+AUTHD_TEST_EXTENDED_USERNS=false
+AUTHD_TEST_GOTMPDIR=
 AUTHD_TEST_CONFIG_BIND_ARGS=()
 AUTHD_TEST_ENV_ARGS=()
 AUTHD_TEST_CAP_ARGS=()
+AUTHD_TEST_GOTMPDIR_ARGS=()
 CRACKLIB_BIND_ARGS=()
 if [[ -f "$MOUNT_DIR/go.mod" ]] &&
     grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
     AUTHD_TEST_ENV_ARGS=(--setenv AUTHD_SKIP_ROOT_TESTS 1)
-    # Nested authd tests need this capability to map UID 0.
-    AUTHD_TEST_CAP_ARGS=(--cap-add CAP_SETFCAP)
+    if /usr/bin/unshare --user --map-root-user --map-users=auto --map-groups=auto -- /usr/bin/true >/dev/null 2>&1; then
+        AUTHD_TEST_EXTENDED_USERNS=true
+        AUTHD_TEST_GOTMPDIR="$(mktemp -d "$MOUNT_DIR/.authd-test-tmp.XXXXXXXX")"
+        chmod 700 "$AUTHD_TEST_GOTMPDIR"
+        AUTHD_TEST_GOTMPDIR_ARGS=(--tmpfs "$AUTHD_TEST_GOTMPDIR")
+        AUTHD_TEST_ENV_ARGS+=(--setenv GOTMPDIR "$AUTHD_TEST_GOTMPDIR")
+        AUTHD_TEST_CAP_ARGS=(
+            --cap-add CAP_CHOWN
+            --cap-add CAP_DAC_OVERRIDE
+            --cap-add CAP_FOWNER
+            --cap-add CAP_FSETID
+            --cap-add CAP_SETFCAP
+        )
+        exec 12< <(awk -F: '$1 != "root" {print} END {print "root:1:65535"}' /etc/subuid)
+        exec 13< <(awk -F: '$1 != "root" {print} END {print "root:1:65535"}' /etc/subgid)
+        AUTHD_TEST_CONFIG_BIND_ARGS+=(
+            --ro-bind-data 12 /etc/subuid
+            --ro-bind-data 13 /etc/subgid
+        )
+
+        if [[ ! -r /etc/apparmor.d/debian-user-config-copilot-authd-tests ]]; then
+            echo "warning: nested authd Go tests need the scoped AppArmor profile; install it with sudo $SCRIPT_DIR/../apparmor/install.sh" >&2
+        fi
+    else
+        echo "warning: subordinate UID/GID mappings are unavailable; nested authd Go tests may fail" >&2
+    fi
     for etc_path in \
         /etc/environment \
         /etc/login.defs \
         /etc/pam.d \
         /etc/security \
         /etc/shells \
-        /etc/subgid \
-        /etc/subuid \
         /etc/sudoers
     do
         if [[ -e "$etc_path" ]]; then
             AUTHD_TEST_CONFIG_BIND_ARGS+=(--ro-bind "$(realpath "$etc_path")" "$etc_path")
         fi
     done
+    if [[ "$AUTHD_TEST_EXTENDED_USERNS" != true ]]; then
+        for etc_path in /etc/subgid /etc/subuid; do
+            if [[ -e "$etc_path" ]]; then
+                AUTHD_TEST_CONFIG_BIND_ARGS+=(--ro-bind "$(realpath "$etc_path")" "$etc_path")
+            fi
+        done
+    fi
 
     if [[ -d /etc/skel ]]; then
         AUTHD_TEST_CONFIG_BIND_ARGS+=(--dir /etc/skel)
@@ -823,6 +857,19 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
         CRACKLIB_CACHE_DIR="$(realpath /var/cache/cracklib)"
         CRACKLIB_BIND_ARGS=(--dir /var/cache --ro-bind "$CRACKLIB_CACHE_DIR" /var/cache/cracklib)
     fi
+fi
+
+cleanup_authd_test_tmpdir() {
+    if [[ -n "$AUTHD_TEST_GOTMPDIR" &&
+        "$AUTHD_TEST_GOTMPDIR" == "$MOUNT_DIR"/.authd-test-tmp.* &&
+        -d "$AUTHD_TEST_GOTMPDIR" && ! -L "$AUTHD_TEST_GOTMPDIR" ]]; then
+        if ! rmdir -- "$AUTHD_TEST_GOTMPDIR"; then
+            echo "warning: leaving non-empty authd Go temporary directory: $AUTHD_TEST_GOTMPDIR" >&2
+        fi
+    fi
+}
+if [[ -n "$AUTHD_TEST_GOTMPDIR" ]]; then
+    trap cleanup_authd_test_tmpdir EXIT
 fi
 
 # Expose the host package database read-only so dpkg-query and
@@ -1025,7 +1072,7 @@ cleanup_e2e_libvirt() {
 }
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    trap cleanup_e2e_libvirt EXIT
+    trap 'cleanup_e2e_libvirt; cleanup_authd_test_tmpdir' EXIT
 
     E2E_LIBVIRT_UNIT="copilot-e2e-libvirt-${USER_ID}-$$-${RANDOM}"
     printf -v E2E_LIBVIRT_START_COMMAND \
@@ -1096,9 +1143,29 @@ if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
     BWRAP_SESSION_ARGS=()
 fi
 
-bwrap \
-    --unshare-all \
-    --share-net \
+# Keep the wider UID/GID map limited to authd worktrees with nested userns tests.
+BWRAP_COMMAND=("$BWRAP_BIN")
+BWRAP_NAMESPACE_ARGS=(--unshare-all --share-net)
+if [[ "$AUTHD_TEST_EXTENDED_USERNS" == true ]]; then
+    BWRAP_COMMAND=(
+        /usr/bin/unshare
+        --user
+        --map-root-user
+        --map-users=auto
+        --map-groups=auto
+        --
+        "$BWRAP_BIN"
+    )
+    BWRAP_NAMESPACE_ARGS=(
+        --unshare-ipc
+        --unshare-pid
+        --unshare-uts
+        --unshare-cgroup-try
+    )
+fi
+
+"${BWRAP_COMMAND[@]}" \
+    "${BWRAP_NAMESPACE_ARGS[@]}" \
     --die-with-parent \
     "${BWRAP_SESSION_ARGS[@]}" \
     --uid 0 \
@@ -1161,6 +1228,7 @@ bwrap \
     \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
+    "${AUTHD_TEST_GOTMPDIR_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
     "${SHARED_CACHE_OVERLAY_ARGS[@]}" \
     "${E2E_SUDO_CLIENT_BIND_ARGS[@]}" \
