@@ -795,10 +795,20 @@ AUTHD_TEST_BWRAP_BIND_ARGS=()
 AUTHD_TEST_CONFIG_BIND_ARGS=()
 AUTHD_TEST_ENV_ARGS=()
 AUTHD_TEST_CAP_ARGS=()
+AUTHD_TEST_CAP_DROP_ARGS=()
 CRACKLIB_BIND_ARGS=()
 if [[ -f "$MOUNT_DIR/go.mod" ]] &&
     grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
-    AUTHD_TEST_ENV_ARGS=(--setenv AUTHD_SKIP_ROOT_TESTS 1)
+    AUTHD_TEST_ENV_ARGS=(
+        --setenv AUTHD_SKIP_ROOT_TESTS 1
+        --setenv AUTHD_TEST_NESTED_USERNS_MAP explicit
+    )
+    AUTHD_TEST_CAP_DROP_ARGS=(--cap-drop CAP_DAC_OVERRIDE)
+    AUTHD_TEST_CONFIG_BIND_ARGS+=(
+        --dir /run
+        --dir /run/sshd
+        --chmod 755 /run/sshd
+    )
     if /usr/bin/unshare --user --map-root-user --map-users=auto --map-groups=auto -- /usr/bin/true >/dev/null 2>&1; then
         AUTHD_TEST_EXTENDED_USERNS=true
         AUTHD_TEST_POLICY_FILE=/etc/apparmor.d/debian-user-config-copilot-authd-tests
@@ -843,7 +853,6 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
         fi
         AUTHD_TEST_CAP_ARGS=(
             --cap-add CAP_CHOWN
-            --cap-add CAP_DAC_OVERRIDE
             --cap-add CAP_FOWNER
             --cap-add CAP_FSETID
             --cap-add CAP_SETFCAP
@@ -1202,6 +1211,7 @@ fi
     --cap-add CAP_SETPCAP \
     --cap-add CAP_MKNOD \
     "${AUTHD_TEST_CAP_ARGS[@]}" \
+    "${AUTHD_TEST_CAP_DROP_ARGS[@]}" \
     "${SANDBOX_ENV_ARGS[@]}" \
     \
     --ro-bind /usr /usr \
