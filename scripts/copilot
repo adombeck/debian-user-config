@@ -14,9 +14,12 @@
 #
 # Libvirt is exposed through its read-only socket by default. Pass
 # --allow-e2e-tests for VM lifecycle and provisioning workflows only when
-# necessary. That profile starts a per-user libvirt session for E2E VMs,
+# necessary. That profile joins a shared per-user libvirt session for E2E VMs,
 # confined by AppArmor to a dedicated data directory and the KVM/VSOCK devices.
 # It never exposes the host's system libvirt socket or system-libvirt VM files.
+# Each launch gets its own VM domain and writable qcow2 overlays; provisioned
+# snapshot disks are shared as read-only backing images. A launch only cleans
+# up its own VM. The shared service stops when no clients or VMs remain.
 # A per-launch host broker allows only read-only guestfish checks through its
 # root-owned helper. Install the scoped AppArmor and sudo policies with
 # ./apparmor/install-e2e-libvirt.sh and ./sudoers/install.sh.
@@ -50,6 +53,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
     exit 1
 fi
 
+USER_ID="$(id -u)"
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 ALLOW_E2E_TESTS=false
@@ -114,10 +118,10 @@ fi
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     cat >&2 <<'EOF'
-warning: --allow-e2e-tests starts an AppArmor-confined, per-user libvirt session
+warning: --allow-e2e-tests joins the shared AppArmor-confined per-user E2E libvirt session
 warning: it does not expose the host's system libvirt socket or a host root shell
 warning: a per-launch broker only allows read-only guestfish cloud-init checks
-warning: E2E VM data is kept separately under ~/.local/share/copilot-e2e-tests
+warning: E2E snapshot backing data is shared read-only; this launch uses private VM overlays
 EOF
 fi
 
@@ -231,6 +235,8 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     done
     for helper in \
         /usr/sbin/libvirtd \
+        /usr/bin/systemd-run \
+        /usr/bin/flock \
         /usr/bin/virsh \
         /usr/bin/qemu-system-x86_64 \
         /usr/bin/guestfish \
@@ -390,8 +396,18 @@ E2E_LIBVIRT_HOME=
 E2E_LIBVIRT_LOG=
 E2E_LIBVIRT_LAUNCHER_DIR=
 E2E_LIBVIRT_LAUNCHER=
+E2E_LIBVIRT_MANAGER_DIR=
+E2E_LIBVIRT_MANAGER_LOCK=
+E2E_LIBVIRT_MANAGER_LOCK_FD=
+E2E_LIBVIRT_LEASE_DIR=
+E2E_LIBVIRT_LEASE_FILE=
+E2E_LIBVIRT_LEASE_FD=
+E2E_LIBVIRT_SESSION_ID=
+AUTHD_E2E_SESSION_DATA_HOST_DIR=
+AUTHD_E2E_SESSION_DATA_CREATED=false
+AUTHD_E2E_TEST_RUNS_HOST_DIR=
 E2E_LIBVIRT_UNIT=
-E2E_LIBVIRT_SCOPE_PID=
+E2E_LIBVIRT_SERVICE_VERIFIED=false
 E2E_LIBVIRT_KVM_GID=
 E2E_SUDO_SOCKET=
 E2E_SUDO_SOCKET_DIR=
@@ -402,6 +418,413 @@ E2E_SUDO_CLIENT_BIND_ARGS=()
 E2E_LIBVIRT_SOCKET_BIND_ARGS=()
 E2E_SSH_PUBLIC_KEY_PARENT_ARGS=()
 E2E_SSH_PUBLIC_KEY_BIND_ARGS=()
+
+e2e_libvirt_virsh() {
+    env \
+        HOME="$E2E_LIBVIRT_HOME" \
+        XDG_RUNTIME_DIR="$E2E_LIBVIRT_RUNTIME_DIR" \
+        XDG_CONFIG_HOME="$E2E_LIBVIRT_CONFIG_HOME" \
+        XDG_CACHE_HOME="$E2E_LIBVIRT_CACHE_HOME" \
+        XDG_DATA_HOME="$E2E_LIBVIRT_DATA_HOME" \
+        /usr/bin/virsh -c qemu:///session "$@"
+}
+
+systemd_user() {
+    env XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" /usr/bin/systemctl --user "$@"
+}
+
+systemd_run_user() {
+    env XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" /usr/bin/systemd-run --user "$@"
+}
+
+# Serialize service setup/teardown and keep one locked lease per active wrapper.
+e2e_libvirt_lock_manager() {
+    if [[ -n "$E2E_LIBVIRT_MANAGER_LOCK_FD" ]]; then
+        return 0
+    fi
+
+    exec 20>>"$E2E_LIBVIRT_MANAGER_LOCK"
+    E2E_LIBVIRT_MANAGER_LOCK_FD=20
+    /usr/bin/flock --exclusive "$E2E_LIBVIRT_MANAGER_LOCK_FD"
+}
+
+e2e_libvirt_unlock_manager() {
+    if [[ -z "$E2E_LIBVIRT_MANAGER_LOCK_FD" ]]; then
+        return 0
+    fi
+
+    if ! /usr/bin/flock --unlock "$E2E_LIBVIRT_MANAGER_LOCK_FD"; then
+        echo "warning: could not release the E2E libvirt manager lock" >&2
+    fi
+    exec 20>&-
+    E2E_LIBVIRT_MANAGER_LOCK_FD=
+}
+
+e2e_libvirt_release_lease() {
+    if [[ -n "$E2E_LIBVIRT_LEASE_FD" ]]; then
+        if ! /usr/bin/flock --unlock "$E2E_LIBVIRT_LEASE_FD"; then
+            echo "warning: could not release the E2E libvirt client lease lock" >&2
+        fi
+        exec 21>&-
+        E2E_LIBVIRT_LEASE_FD=
+    fi
+    if [[ -n "$E2E_LIBVIRT_LEASE_FILE" ]]; then
+        if ! rm -f -- "$E2E_LIBVIRT_LEASE_FILE"; then
+            return 1
+        fi
+        E2E_LIBVIRT_LEASE_FILE=
+    fi
+    return 0
+}
+
+e2e_libvirt_has_active_clients() {
+    local lease_file
+    local probe_fd
+    local active=false
+    local -a lease_files=()
+
+    shopt -s nullglob
+    lease_files=("$E2E_LIBVIRT_LEASE_DIR"/lease.*)
+    shopt -u nullglob
+
+    for lease_file in "${lease_files[@]}"; do
+        if [[ -L "$lease_file" || ! -f "$lease_file" ]]; then
+            echo "warning: ignoring unsafe E2E libvirt lease entry: $lease_file" >&2
+            active=true
+            continue
+        fi
+        if ! exec {probe_fd}<>"$lease_file"; then
+            echo "warning: could not inspect E2E libvirt lease: $lease_file" >&2
+            active=true
+            continue
+        fi
+        if /usr/bin/flock --nonblock --exclusive "$probe_fd"; then
+            if ! rm -f -- "$lease_file"; then
+                echo "warning: could not remove stale E2E libvirt lease: $lease_file" >&2
+                active=true
+            fi
+            if ! /usr/bin/flock --unlock "$probe_fd"; then
+                echo "warning: could not release stale E2E libvirt lease lock: $lease_file" >&2
+                active=true
+            fi
+        else
+            active=true
+        fi
+        exec {probe_fd}>&-
+    done
+
+    [[ "$active" == true ]]
+}
+
+e2e_libvirt_clear_stale_sockets() {
+    local socket_path
+    local -a socket_paths=(
+        "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock"
+        "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock-ro"
+        "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock-admin"
+    )
+
+    for socket_path in "${socket_paths[@]}"; do
+        if [[ -L "$socket_path" ]]; then
+            echo "error: refusing to use symlinked E2E libvirt socket: $socket_path" >&2
+            return 1
+        fi
+        if [[ ! -e "$socket_path" ]]; then
+            continue
+        fi
+        if [[ ! -S "$socket_path" ]] ||
+            [[ "$(stat -c '%u' "$socket_path")" != "$USER_ID" ]]; then
+            echo "error: refusing to remove unexpected E2E libvirt socket path: $socket_path" >&2
+            return 1
+        fi
+        if e2e_libvirt_virsh list --all >/dev/null 2>&1; then
+            echo "error: an E2E libvirt socket is responding without its expected user service" >&2
+            return 1
+        fi
+        if ! rm -f -- "$socket_path"; then
+            echo "error: could not remove stale E2E libvirt socket: $socket_path" >&2
+            return 1
+        fi
+    done
+}
+
+e2e_libvirt_assert_no_legacy_sessions() {
+    local socket_path
+    local -a legacy_sockets=()
+
+    shopt -s nullglob
+    legacy_sockets=("$HOST_XDG_RUNTIME_DIR"/copilot-e2e-libvirt.*/libvirt/libvirt-sock)
+    shopt -u nullglob
+
+    for socket_path in "${legacy_sockets[@]}"; do
+        if [[ -S "$socket_path" ]] &&
+            /usr/bin/virsh -c "qemu+unix:///session?socket=$socket_path" \
+                list --all >/dev/null 2>&1; then
+            echo "error: an older per-launch E2E libvirt session is still active" >&2
+            echo "error: close older --allow-e2e-tests Copilot launches before retrying" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+e2e_libvirt_validate_service() {
+    local pid
+    local apparmor_profile
+
+    pid="$(systemd_user show --property=MainPID --value "$E2E_LIBVIRT_UNIT")"
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ || ! -r "/proc/$pid/attr/current" ]]; then
+        echo "error: could not verify the shared E2E libvirt service process" >&2
+        return 1
+    fi
+    if ! IFS= read -r apparmor_profile <"/proc/$pid/attr/current" ||
+        [[ "$apparmor_profile" != debian-user-config-copilot-e2e-libvirt* ]]; then
+        echo "error: the shared E2E libvirt service is not using its AppArmor profile" >&2
+        return 1
+    fi
+    return 0
+}
+
+e2e_libvirt_start_or_join() {
+    local attempt
+    local socket_path="$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock"
+    local ready=false
+    local started_service=false
+    local newgrp_command
+    local -a start_args=()
+
+    if ! e2e_libvirt_assert_no_legacy_sessions; then
+        return 1
+    fi
+    if [[ -L "$socket_path" ]]; then
+        echo "error: refusing to use a symlinked shared E2E libvirt socket" >&2
+        return 1
+    elif [[ -e "$socket_path" && ! -S "$socket_path" ]]; then
+        echo "error: shared E2E libvirt socket path is not a socket" >&2
+        return 1
+    fi
+    if ! systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT"; then
+        if ! e2e_libvirt_clear_stale_sockets; then
+            return 1
+        fi
+        if ! "$SCRIPT_DIR/copilot-e2e-rebase-libvirt-xml" \
+            "$E2E_LIBVIRT_CONFIG_DATA_HOME/libvirt/qemu" \
+            "$HOST_XDG_RUNTIME_DIR" \
+            "$E2E_LIBVIRT_SOCKET_DIR"; then
+            echo "error: could not prepare persisted E2E libvirt domain definitions" >&2
+            return 1
+        fi
+        if [[ -L "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf" ||
+            (-e "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf" &&
+                ! -f "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf") ]]; then
+            echo "error: refusing to use an unexpected E2E libvirt qemu.conf path" >&2
+            return 1
+        fi
+        if ! printf 'security_driver = "none"\n' \
+            >"$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf"; then
+            echo "error: could not write the E2E libvirt qemu.conf file" >&2
+            return 1
+        fi
+        if ! chmod 600 "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf"; then
+            echo "error: could not secure the E2E libvirt qemu.conf file" >&2
+            return 1
+        fi
+        if systemd_user is-failed --quiet "$E2E_LIBVIRT_UNIT"; then
+            if ! systemd_user reset-failed "$E2E_LIBVIRT_UNIT"; then
+                echo "error: could not reset the failed E2E libvirt service unit" >&2
+                return 1
+            fi
+        fi
+        if [[ -L "$E2E_LIBVIRT_LOG" ||
+            (-e "$E2E_LIBVIRT_LOG" && ! -f "$E2E_LIBVIRT_LOG") ]]; then
+            echo "error: refusing to use unexpected E2E libvirt log path: $E2E_LIBVIRT_LOG" >&2
+            return 1
+        fi
+        if ! : >"$E2E_LIBVIRT_LOG" || ! chmod 600 "$E2E_LIBVIRT_LOG"; then
+            echo "error: could not prepare the E2E libvirt service log" >&2
+            return 1
+        fi
+        printf -v newgrp_command 'exec %q' "$E2E_LIBVIRT_LAUNCHER"
+        start_args=(
+            "--unit=$E2E_LIBVIRT_UNIT"
+            --collect
+            --quiet
+            --property=Type=exec
+            "--property=WorkingDirectory=$E2E_LIBVIRT_RUNTIME_DIR"
+            "--property=StandardOutput=append:$E2E_LIBVIRT_LOG"
+            "--property=StandardError=append:$E2E_LIBVIRT_LOG"
+            "--setenv=HOME=$HOME"
+            "--setenv=USER=$(id -un)"
+            "--setenv=LOGNAME=$(id -un)"
+            "--setenv=PATH=/usr/bin:/usr/sbin:/bin:/sbin"
+            "--setenv=COPILOT_E2E_LIBVIRT_UID=$USER_ID"
+            "--setenv=COPILOT_E2E_LIBVIRT_KVM_GID=$E2E_LIBVIRT_KVM_GID"
+            "--setenv=COPILOT_E2E_LIBVIRT_RUNTIME_DIR=$E2E_LIBVIRT_RUNTIME_DIR"
+            "--setenv=COPILOT_E2E_LIBVIRT_CONFIG_HOME=$E2E_LIBVIRT_CONFIG_HOME"
+            "--setenv=COPILOT_E2E_LIBVIRT_CACHE_HOME=$E2E_LIBVIRT_CACHE_HOME"
+            "--setenv=COPILOT_E2E_LIBVIRT_DATA_HOME=$E2E_LIBVIRT_DATA_HOME"
+            "--setenv=COPILOT_E2E_LIBVIRT_HOME=$E2E_LIBVIRT_HOME"
+            "--setenv=AUTHD_E2E_DATA_DIR=$AUTHD_E2E_DATA_HOST_DIR"
+            "--setenv=XDG_RUNTIME_DIR=$HOST_XDG_RUNTIME_DIR"
+            --
+            /usr/bin/newgrp
+            -c
+            "$newgrp_command"
+            kvm
+        )
+        if ! systemd_run_user "${start_args[@]}"; then
+            echo "error: could not start the shared AppArmor-confined E2E libvirt service" >&2
+            if [[ -s "$E2E_LIBVIRT_LOG" ]]; then
+                cat "$E2E_LIBVIRT_LOG" >&2
+            fi
+            return 1
+        fi
+        started_service=true
+    fi
+
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        if [[ -S "$socket_path" ]] &&
+            [[ "$(stat -c '%u' "$socket_path")" == "$USER_ID" ]] &&
+            e2e_libvirt_virsh list --all >/dev/null 2>&1; then
+            ready=true
+            break
+        fi
+        if ! systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT"; then
+            break
+        fi
+        sleep 0.05
+    done
+    if [[ "$ready" != true ]]; then
+        echo "error: could not initialize the shared AppArmor-confined E2E libvirt session" >&2
+        echo "error: inspect the service with: systemctl --user status $E2E_LIBVIRT_UNIT" >&2
+        if [[ -s "$E2E_LIBVIRT_LOG" ]]; then
+            cat "$E2E_LIBVIRT_LOG" >&2
+        fi
+        if [[ "$started_service" == true ]] &&
+            systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT"; then
+            if ! systemd_user stop "$E2E_LIBVIRT_UNIT" >/dev/null 2>&1; then
+                echo "warning: could not stop the failed E2E libvirt service" >&2
+            fi
+        fi
+        return 1
+    fi
+
+    if ! e2e_libvirt_validate_service; then
+        if [[ "$started_service" == true ]] &&
+            systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT"; then
+            if ! systemd_user stop "$E2E_LIBVIRT_UNIT" >/dev/null 2>&1; then
+                echo "warning: could not stop the unverified E2E libvirt service" >&2
+            fi
+        fi
+        return 1
+    fi
+    E2E_LIBVIRT_SERVICE_VERIFIED=true
+}
+
+cleanup_e2e_libvirt() {
+    if [[ -n "$E2E_LIBVIRT_MANAGER_LOCK" ]] &&
+        e2e_libvirt_lock_manager; then
+        if ! e2e_libvirt_release_lease; then
+            echo "warning: could not remove this Copilot launch's E2E libvirt lease" >&2
+        fi
+        local session_cleanup_safe=true
+        local vm_names=
+        local vm_name
+        local vm_state
+        local running_domains=
+
+        if [[ "$E2E_LIBVIRT_SERVICE_VERIFIED" == true ]] &&
+            [[ -S "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock" ]]; then
+            if ! vm_names="$(e2e_libvirt_virsh list --all --name 2>/dev/null)"; then
+                echo "warning: could not list E2E VMs during session cleanup" >&2
+                session_cleanup_safe=false
+            else
+                while IFS= read -r vm_name; do
+                    [[ "$vm_name" == *"-copilot-$E2E_LIBVIRT_SESSION_ID" ]] || continue
+                    if ! vm_state="$(e2e_libvirt_virsh domstate "$vm_name" 2>/dev/null)"; then
+                        echo "warning: could not inspect this session's E2E VM: $vm_name" >&2
+                        session_cleanup_safe=false
+                        continue
+                    fi
+                    case "$vm_state" in
+                    running|idle|blocked|paused|shutdown|"in shutdown"|pmsuspended)
+                        if ! e2e_libvirt_virsh destroy "$vm_name" >/dev/null 2>&1; then
+                            echo "warning: could not stop this session's E2E VM: $vm_name" >&2
+                            session_cleanup_safe=false
+                            continue
+                        fi
+                        ;;
+                    "shut off"|crashed)
+                        ;;
+                    *)
+                        echo "warning: leaving E2E VM in unexpected state '$vm_state': $vm_name" >&2
+                        session_cleanup_safe=false
+                        continue
+                        ;;
+                    esac
+                    if ! e2e_libvirt_virsh undefine "$vm_name" --snapshots-metadata >/dev/null 2>&1; then
+                        echo "warning: could not undefine this session's E2E VM: $vm_name" >&2
+                        session_cleanup_safe=false
+                    fi
+                done <<<"$vm_names"
+            fi
+        elif [[ "$E2E_LIBVIRT_SERVICE_VERIFIED" == true ]]; then
+            echo "warning: shared E2E libvirt socket is unavailable; retaining this session's VM data" >&2
+            session_cleanup_safe=false
+        fi
+
+        if [[ "$session_cleanup_safe" == true &&
+            "$AUTHD_E2E_SESSION_DATA_CREATED" == true &&
+            -n "$AUTHD_E2E_SESSION_DATA_HOST_DIR" &&
+            "$AUTHD_E2E_SESSION_DATA_HOST_DIR" == \
+                "$AUTHD_E2E_DATA_HOST_DIR"/sessions/"$E2E_LIBVIRT_SESSION_ID" &&
+            -d "$AUTHD_E2E_SESSION_DATA_HOST_DIR" &&
+            ! -L "$AUTHD_E2E_SESSION_DATA_HOST_DIR" ]]; then
+            if ! rm -rf -- "$AUTHD_E2E_SESSION_DATA_HOST_DIR"; then
+                echo "warning: could not remove this Copilot launch's E2E VM data" >&2
+                session_cleanup_safe=false
+            fi
+        fi
+
+        if [[ "$session_cleanup_safe" == true &&
+            "$E2E_LIBVIRT_SERVICE_VERIFIED" == true ]] &&
+            ! e2e_libvirt_has_active_clients &&
+            systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT"; then
+            if [[ ! -S "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock" ]]; then
+                echo "warning: shared E2E libvirt socket is unavailable; leaving service running" >&2
+            elif ! running_domains="$(e2e_libvirt_virsh list --state-running --name 2>/dev/null)"; then
+                echo "warning: could not list running E2E VMs; leaving libvirt running" >&2
+            elif [[ -n "$running_domains" ]]; then
+                echo "info: leaving shared E2E libvirt running for other active VMs" >&2
+            elif ! systemd_user stop "$E2E_LIBVIRT_UNIT" >/dev/null 2>&1; then
+                echo "warning: could not stop the shared E2E libvirt service" >&2
+            fi
+        fi
+        e2e_libvirt_unlock_manager
+    else
+        if [[ -n "$E2E_LIBVIRT_LEASE_FILE" ]]; then
+            echo "warning: could not lock shared E2E libvirt state during cleanup" >&2
+        fi
+    fi
+
+    if [[ -n "$E2E_SUDO_HELPER_PID" ]]; then
+        if kill -0 "$E2E_SUDO_HELPER_PID" 2>/dev/null; then
+            kill "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
+        fi
+        wait "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$E2E_SUDO_SOCKET_DIR" &&
+        "$E2E_SUDO_SOCKET_DIR" == "$COPILOT_HOME"/.e2e-sudo.* ]]; then
+        if [[ -S "$E2E_SUDO_SOCKET" ]]; then
+            rm -f -- "$E2E_SUDO_SOCKET"
+        fi
+        rmdir -- "$E2E_SUDO_SOCKET_DIR" 2>/dev/null || true
+    fi
+    if [[ -n "$E2E_SUDO_HELPER_LOG" &&
+        "$E2E_SUDO_HELPER_LOG" == "$E2E_LIBVIRT_MANAGER_DIR"/sudo-helper.* ]]; then
+        rm -f -- "$E2E_SUDO_HELPER_LOG"
+    fi
+}
 
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     HOST_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
@@ -461,7 +884,6 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         echo "error: E2E data directory is not owned by the current user" >&2
         exit 1
     fi
-    AUTHD_E2E_DATA_DIR="$AUTHD_E2E_DATA_HOST_DIR"
 
     # Keep libvirt's domain/snapshot metadata across launches. The short path
     # leaves room for Unix socket names created below it.
@@ -482,11 +904,137 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         exit 1
     fi
 
-    E2E_LIBVIRT_RUNTIME_DIR="$(mktemp -d "$HOST_XDG_RUNTIME_DIR/copilot-e2e-libvirt.XXXXXXXX")"
+    E2E_LIBVIRT_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR/copilot-e2e-libvirt"
+    if [[ -L "$E2E_LIBVIRT_RUNTIME_DIR" ]]; then
+        echo "error: refusing to use a symlinked shared E2E libvirt runtime directory" >&2
+        exit 1
+    elif [[ -e "$E2E_LIBVIRT_RUNTIME_DIR" && ! -d "$E2E_LIBVIRT_RUNTIME_DIR" ]]; then
+        echo "error: shared E2E libvirt runtime path is not a directory" >&2
+        exit 1
+    fi
+    mkdir -p "$E2E_LIBVIRT_RUNTIME_DIR"
     chmod 700 "$E2E_LIBVIRT_RUNTIME_DIR"
+    if [[ "$(stat -c '%u' "$E2E_LIBVIRT_RUNTIME_DIR")" != "$USER_ID" ]]; then
+        echo "error: shared E2E libvirt runtime directory is not owned by the current user" >&2
+        exit 1
+    fi
+
+    # Keep coordination locks outside the AppArmor-writable libvirt runtime.
+    E2E_LIBVIRT_MANAGER_DIR="$HOST_XDG_RUNTIME_DIR/copilot-e2e-libvirt-manager"
+    if [[ -L "$E2E_LIBVIRT_MANAGER_DIR" ]]; then
+        echo "error: refusing to use a symlinked E2E libvirt manager directory" >&2
+        exit 1
+    elif [[ -e "$E2E_LIBVIRT_MANAGER_DIR" && ! -d "$E2E_LIBVIRT_MANAGER_DIR" ]]; then
+        echo "error: E2E libvirt manager path is not a directory" >&2
+        exit 1
+    fi
+    mkdir -p "$E2E_LIBVIRT_MANAGER_DIR"
+    chmod 700 "$E2E_LIBVIRT_MANAGER_DIR"
+    if [[ "$(stat -c '%u' "$E2E_LIBVIRT_MANAGER_DIR")" != "$USER_ID" ]]; then
+        echo "error: E2E libvirt manager directory is not owned by the current user" >&2
+        exit 1
+    fi
+    E2E_LIBVIRT_MANAGER_LOCK="$E2E_LIBVIRT_MANAGER_DIR/lock"
+    if [[ -L "$E2E_LIBVIRT_MANAGER_LOCK" ]]; then
+        echo "error: refusing to use a symlinked E2E libvirt manager lock" >&2
+        exit 1
+    elif [[ -e "$E2E_LIBVIRT_MANAGER_LOCK" && ! -f "$E2E_LIBVIRT_MANAGER_LOCK" ]]; then
+        echo "error: E2E libvirt manager lock is not a regular file" >&2
+        exit 1
+    fi
+    : >>"$E2E_LIBVIRT_MANAGER_LOCK"
+    chmod 600 "$E2E_LIBVIRT_MANAGER_LOCK"
+    if [[ "$(stat -c '%u' "$E2E_LIBVIRT_MANAGER_LOCK")" != "$USER_ID" ]]; then
+        echo "error: E2E libvirt manager lock is not owned by the current user" >&2
+        exit 1
+    fi
+    E2E_LIBVIRT_LEASE_DIR="$E2E_LIBVIRT_MANAGER_DIR/leases"
+    if [[ -L "$E2E_LIBVIRT_LEASE_DIR" ]]; then
+        echo "error: refusing to use a symlinked E2E libvirt lease directory" >&2
+        exit 1
+    elif [[ -e "$E2E_LIBVIRT_LEASE_DIR" && ! -d "$E2E_LIBVIRT_LEASE_DIR" ]]; then
+        echo "error: E2E libvirt lease path is not a directory" >&2
+        exit 1
+    fi
+    mkdir -p "$E2E_LIBVIRT_LEASE_DIR"
+    chmod 700 "$E2E_LIBVIRT_LEASE_DIR"
+    if [[ "$(stat -c '%u' "$E2E_LIBVIRT_LEASE_DIR")" != "$USER_ID" ]]; then
+        echo "error: E2E libvirt lease directory is not owned by the current user" >&2
+        exit 1
+    fi
+
+    E2E_LIBVIRT_UNIT="copilot-e2e-libvirt-${USER_ID}.service"
+    E2E_LIBVIRT_LOG="$E2E_LIBVIRT_RUNTIME_DIR/launcher.log"
+    e2e_libvirt_lock_manager
+    E2E_LIBVIRT_LEASE_FILE="$(mktemp "$E2E_LIBVIRT_LEASE_DIR/lease.XXXXXXXX")"
+    exec 21<>"$E2E_LIBVIRT_LEASE_FILE"
+    E2E_LIBVIRT_LEASE_FD=21
+    if ! /usr/bin/flock --nonblock --exclusive "$E2E_LIBVIRT_LEASE_FD"; then
+        echo "error: could not acquire a shared E2E libvirt lease" >&2
+        exit 1
+    fi
+    trap cleanup_e2e_libvirt EXIT
+
+    E2E_LIBVIRT_SESSION_ID="${E2E_LIBVIRT_LEASE_FILE##*/lease.}"
+    if [[ ! "$E2E_LIBVIRT_SESSION_ID" =~ ^[[:alnum:]]{8}$ ]]; then
+        echo "error: could not create a valid E2E session identifier" >&2
+        exit 1
+    fi
+    E2E_LIBVIRT_SESSION_ID="${E2E_LIBVIRT_SESSION_ID,,}"
+
+    AUTHD_E2E_SESSION_PARENT="$AUTHD_E2E_DATA_HOST_DIR/sessions"
+    if [[ -L "$AUTHD_E2E_SESSION_PARENT" ]]; then
+        echo "error: refusing to use a symlinked E2E session directory" >&2
+        exit 1
+    elif [[ -e "$AUTHD_E2E_SESSION_PARENT" && ! -d "$AUTHD_E2E_SESSION_PARENT" ]]; then
+        echo "error: E2E session path is not a directory" >&2
+        exit 1
+    fi
+    mkdir -p "$AUTHD_E2E_SESSION_PARENT"
+    chmod 700 "$AUTHD_E2E_SESSION_PARENT"
+    if [[ "$(stat -c '%u' "$AUTHD_E2E_SESSION_PARENT")" != "$USER_ID" ]]; then
+        echo "error: E2E session directory is not owned by the current user" >&2
+        exit 1
+    fi
+    AUTHD_E2E_SESSION_DATA_HOST_DIR="$AUTHD_E2E_SESSION_PARENT/$E2E_LIBVIRT_SESSION_ID"
+    if [[ -L "$AUTHD_E2E_SESSION_DATA_HOST_DIR" ||
+        -e "$AUTHD_E2E_SESSION_DATA_HOST_DIR" ]]; then
+        echo "error: E2E session data path already exists: $AUTHD_E2E_SESSION_DATA_HOST_DIR" >&2
+        exit 1
+    fi
+    mkdir -m 700 "$AUTHD_E2E_SESSION_DATA_HOST_DIR"
+    AUTHD_E2E_SESSION_DATA_CREATED=true
+
+    AUTHD_E2E_TEST_RUNS_PARENT="/run/user/$USER_ID/authd-e2e-test-runs"
+    if [[ -L "$AUTHD_E2E_TEST_RUNS_PARENT" || ! -d "$AUTHD_E2E_TEST_RUNS_PARENT" ]]; then
+        echo "error: authd E2E test runs directory is missing or invalid: $AUTHD_E2E_TEST_RUNS_PARENT" >&2
+        exit 1
+    fi
+    if [[ "$(stat -c '%u' "$AUTHD_E2E_TEST_RUNS_PARENT")" != "$USER_ID" ]]; then
+        echo "error: authd E2E test runs directory is not owned by the current user" >&2
+        exit 1
+    fi
+    AUTHD_E2E_TEST_RUNS_HOST_DIR="$AUTHD_E2E_TEST_RUNS_PARENT/copilot-$E2E_LIBVIRT_SESSION_ID"
+    if [[ -L "$AUTHD_E2E_TEST_RUNS_HOST_DIR" ||
+        -e "$AUTHD_E2E_TEST_RUNS_HOST_DIR" ]]; then
+        echo "error: E2E session test runs path already exists: $AUTHD_E2E_TEST_RUNS_HOST_DIR" >&2
+        exit 1
+    fi
+    mkdir -m 700 "$AUTHD_E2E_TEST_RUNS_HOST_DIR"
+
     E2E_LIBVIRT_SOCKET_DIR="$E2E_LIBVIRT_RUNTIME_DIR/libvirt"
     E2E_LIBVIRT_CONFIG_HOME="$E2E_LIBVIRT_RUNTIME_DIR/config"
-    ln -s "$E2E_LIBVIRT_CONFIG_DATA_HOME" "$E2E_LIBVIRT_CONFIG_HOME"
+    if [[ -L "$E2E_LIBVIRT_CONFIG_HOME" ]]; then
+        if [[ "$(realpath "$E2E_LIBVIRT_CONFIG_HOME")" != "$E2E_LIBVIRT_CONFIG_DATA_HOME" ]]; then
+            echo "error: shared E2E libvirt configuration symlink has an unexpected target" >&2
+            exit 1
+        fi
+    elif [[ -e "$E2E_LIBVIRT_CONFIG_HOME" ]]; then
+        echo "error: shared E2E libvirt configuration path is not a symlink" >&2
+        exit 1
+    else
+        ln -s "$E2E_LIBVIRT_CONFIG_DATA_HOME" "$E2E_LIBVIRT_CONFIG_HOME"
+    fi
     E2E_LIBVIRT_CACHE_HOME="$E2E_LIBVIRT_RUNTIME_DIR/cache"
     E2E_LIBVIRT_DATA_HOME="$E2E_LIBVIRT_RUNTIME_DIR/data"
     E2E_LIBVIRT_HOME="$E2E_LIBVIRT_RUNTIME_DIR/home"
@@ -513,6 +1061,18 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         "$E2E_LIBVIRT_SOCKET_DIR/storage/run"
         "$E2E_LIBVIRT_HOME/tmp"
     )
+    for directory in "${E2E_LIBVIRT_PRIVATE_DIRS[@]}"; do
+        if [[ "$directory" == "$E2E_LIBVIRT_CONFIG_HOME" ]]; then
+            continue
+        fi
+        if [[ -L "$directory" ]]; then
+            echo "error: refusing to use symlinked shared E2E libvirt path: $directory" >&2
+            exit 1
+        elif [[ -e "$directory" && ! -d "$directory" ]]; then
+            echo "error: shared E2E libvirt path is not a directory: $directory" >&2
+            exit 1
+        fi
+    done
     for directory in \
         "$E2E_LIBVIRT_CONFIG_DATA_HOME/libvirt" \
         "$E2E_LIBVIRT_CONFIG_DATA_HOME/libvirt/qemu"
@@ -527,16 +1087,6 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     done
     mkdir -p "${E2E_LIBVIRT_PRIVATE_DIRS[@]}"
     chmod 700 "${E2E_LIBVIRT_PRIVATE_DIRS[@]}"
-    # Libvirt persists guest-agent socket paths with its domain metadata. Rebase
-    # paths from earlier per-launch runtime directories before starting it.
-    "$SCRIPT_DIR/copilot-e2e-rebase-libvirt-xml" \
-        "$E2E_LIBVIRT_CONFIG_DATA_HOME/libvirt/qemu" \
-        "$HOST_XDG_RUNTIME_DIR" \
-        "$E2E_LIBVIRT_SOCKET_DIR"
-    printf 'security_driver = "none"\n' \
-        >"$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf"
-    chmod 600 "$E2E_LIBVIRT_CONFIG_HOME/libvirt/qemu.conf"
-    E2E_LIBVIRT_LOG="$E2E_LIBVIRT_RUNTIME_DIR/launcher.log"
 
     E2E_LIBVIRT_LAUNCHER_DIR="$HOME/.local/libexec/debian-user-config-e2e"
     if [[ -L "$E2E_LIBVIRT_LAUNCHER_DIR" ]]; then
@@ -803,7 +1353,6 @@ fi
 # dbus-daemon requires a passwd and group entry for the sandboxed UID. The
 # host's NSS configuration provides those entries, but they are not always in
 # /etc/passwd and /etc/group.
-USER_ID="$(id -u)"
 GROUP_ID="$(id -g)"
 if ! CURRENT_USER_ENTRY="$(getent passwd "$USER_ID")"; then
     CURRENT_USER_ENTRY=
@@ -1073,11 +1622,12 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     fi
 fi
 
-# Expose read-only libvirt metadata by default. The E2E profile binds only the
-# private session socket created for this Copilot launch.
+# Expose read-only libvirt metadata by default. The E2E profile gets read-only
+# access to the shared private session socket directory.
 LIBVIRT_BIND_ARGS=(--bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock)
 E2E_LIBVIRT_SOCKET_BIND_ARGS=()
 AUTHD_E2E_DATA_BIND_ARGS=()
+AUTHD_E2E_SESSION_DATA_BIND_ARGS=()
 AUTHD_E2E_TEST_RUNS_PARENT_ARGS=()
 AUTHD_E2E_TEST_RUNS_BIND_ARGS=()
 
@@ -1115,16 +1665,16 @@ SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_ARTIFACTS_DIR "$AUTHD_E2E_ARTIFACTS_DIR")
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     LIBVIRT_BIND_ARGS=()
     E2E_LIBVIRT_SOCKET_BIND_ARGS=(
-        --bind "$E2E_LIBVIRT_SOCKET_DIR" /tmp/copilot-runtime/libvirt
-        --bind "$E2E_LIBVIRT_SOCKET_DIR" /var/run/libvirt
+        --ro-bind "$E2E_LIBVIRT_SOCKET_DIR" /tmp/copilot-runtime/libvirt
+        --ro-bind "$E2E_LIBVIRT_SOCKET_DIR" /var/run/libvirt
     )
-    AUTHD_E2E_DATA_BIND_ARGS=(--bind "$AUTHD_E2E_DATA_DIR" "$AUTHD_E2E_DATA_DIR")
-    AUTHD_E2E_TEST_RUNS_DIR="/run/user/$USER_ID/authd-e2e-test-runs"
-    if [[ -L "$AUTHD_E2E_TEST_RUNS_DIR" ]]; then
-        echo "error: refusing to use symlinked authd E2E test runs directory: $AUTHD_E2E_TEST_RUNS_DIR" >&2
-        exit 1
-    elif [[ ! -d "$AUTHD_E2E_TEST_RUNS_DIR" ]]; then
-        echo "error: authd E2E test runs directory not found: $AUTHD_E2E_TEST_RUNS_DIR" >&2
+    AUTHD_E2E_DATA_BIND_ARGS=(--ro-bind "$AUTHD_E2E_DATA_HOST_DIR" "$AUTHD_E2E_DATA_HOST_DIR")
+    AUTHD_E2E_SESSION_DATA_BIND_ARGS=(
+        --bind "$AUTHD_E2E_SESSION_DATA_HOST_DIR" "$AUTHD_E2E_SESSION_DATA_HOST_DIR"
+    )
+    AUTHD_E2E_TEST_RUNS_DIR="$AUTHD_E2E_TEST_RUNS_HOST_DIR"
+    if [[ -L "$AUTHD_E2E_TEST_RUNS_DIR" || ! -d "$AUTHD_E2E_TEST_RUNS_DIR" ]]; then
+        echo "error: authd E2E session test runs directory is missing or invalid: $AUTHD_E2E_TEST_RUNS_DIR" >&2
         exit 1
     fi
     AUTHD_E2E_TEST_RUNS_PARENT_ARGS=(
@@ -1135,7 +1685,11 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     AUTHD_E2E_TEST_RUNS_BIND_ARGS=(
         --bind "$AUTHD_E2E_TEST_RUNS_DIR" "$AUTHD_E2E_TEST_RUNS_DIR"
     )
-    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_DATA_DIR "$AUTHD_E2E_DATA_DIR")
+    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_DATA_DIR "$AUTHD_E2E_SESSION_DATA_HOST_DIR")
+    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_SHARED_DATA_DIR "$AUTHD_E2E_DATA_HOST_DIR")
+    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_SESSION_DATA_DIR "$AUTHD_E2E_SESSION_DATA_HOST_DIR")
+    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_SESSION_ID "$E2E_LIBVIRT_SESSION_ID")
+    SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_LIBVIRT_SOCKET_DIR "$E2E_LIBVIRT_SOCKET_DIR")
     SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_TEST_RUNS_DIR "$AUTHD_E2E_TEST_RUNS_DIR")
 fi
 
@@ -1144,120 +1698,18 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     VSOCK_DEVICE_BIND_ARGS=(--dev-bind /dev/vsock /dev/vsock)
 fi
 
-e2e_libvirt_virsh() {
-    env \
-        HOME="$E2E_LIBVIRT_HOME" \
-        XDG_RUNTIME_DIR="$E2E_LIBVIRT_RUNTIME_DIR" \
-        XDG_CONFIG_HOME="$E2E_LIBVIRT_CONFIG_HOME" \
-        XDG_CACHE_HOME="$E2E_LIBVIRT_CACHE_HOME" \
-        XDG_DATA_HOME="$E2E_LIBVIRT_DATA_HOME" \
-        /usr/bin/virsh -c qemu:///session "$@"
-}
-
-systemd_user() {
-    env XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" /usr/bin/systemctl --user "$@"
-}
-
-cleanup_e2e_libvirt() {
-    if [[ -S "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock" ]]; then
-        local domain
-        local -a running_domains=()
-        while IFS= read -r domain; do
-            if [[ -n "$domain" ]]; then
-                running_domains+=("$domain")
-            fi
-        done < <(e2e_libvirt_virsh list --state-running --name 2>/dev/null || true)
-
-        for domain in "${running_domains[@]}"; do
-            if ! e2e_libvirt_virsh destroy "$domain" >/dev/null 2>&1; then
-                echo "warning: could not stop E2E VM during cleanup: $domain" >&2
-            fi
-        done
-    fi
-
-    if [[ -n "$E2E_LIBVIRT_UNIT" ]]; then
-        if systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT.scope" &&
-            ! systemd_user stop "$E2E_LIBVIRT_UNIT.scope" >/dev/null 2>&1; then
-            echo "warning: could not stop the private E2E libvirt scope" >&2
-        fi
-    fi
-    if [[ -n "$E2E_LIBVIRT_SCOPE_PID" ]]; then
-        wait "$E2E_LIBVIRT_SCOPE_PID" 2>/dev/null || true
-    fi
-    if [[ -n "$E2E_SUDO_HELPER_PID" ]]; then
-        if kill -0 "$E2E_SUDO_HELPER_PID" 2>/dev/null; then
-            kill "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
-        fi
-        wait "$E2E_SUDO_HELPER_PID" 2>/dev/null || true
-    fi
-    if [[ -n "$E2E_SUDO_SOCKET_DIR" &&
-        "$E2E_SUDO_SOCKET_DIR" == "$COPILOT_HOME"/.e2e-sudo.* ]]; then
-        if [[ -S "$E2E_SUDO_SOCKET" ]]; then
-            rm -f -- "$E2E_SUDO_SOCKET"
-        fi
-        rmdir -- "$E2E_SUDO_SOCKET_DIR" 2>/dev/null || true
-    fi
-    if [[ -n "$E2E_LIBVIRT_RUNTIME_DIR" &&
-        "$E2E_LIBVIRT_RUNTIME_DIR" == "$HOST_XDG_RUNTIME_DIR"/copilot-e2e-libvirt.* ]]; then
-        rm -rf -- "$E2E_LIBVIRT_RUNTIME_DIR"
-    fi
-}
-
 if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    trap cleanup_e2e_libvirt EXIT
-
     E2E_SUDO_SOCKET_DIR="$(mktemp -d "$COPILOT_HOME/.e2e-sudo.XXXXXXXX")"
     chmod 700 "$E2E_SUDO_SOCKET_DIR"
     E2E_SUDO_SOCKET="$E2E_SUDO_SOCKET_DIR/sock"
     E2E_SUDO_ALLOWED_IMAGE_ROOTS=("$AUTHD_E2E_DATA_HOST_DIR")
     SANDBOX_ENV_ARGS+=(--setenv COPILOT_E2E_SUDO_SOCKET "$E2E_SUDO_SOCKET")
 
-    E2E_LIBVIRT_UNIT="copilot-e2e-libvirt-${USER_ID}-$$-${RANDOM}"
-    printf -v E2E_LIBVIRT_START_COMMAND \
-        'cd %q && exec /usr/bin/systemd-run --user --scope --unit=%q --collect --quiet -- %q' \
-        "$E2E_LIBVIRT_RUNTIME_DIR" \
-        "$E2E_LIBVIRT_UNIT" \
-        "$E2E_LIBVIRT_LAUNCHER"
-
-    env -i \
-        HOME="$HOME" \
-        USER="$(id -un)" \
-        LOGNAME="$(id -un)" \
-        PATH=/usr/bin:/usr/sbin:/bin:/sbin \
-        COPILOT_E2E_LIBVIRT_UID="$USER_ID" \
-        COPILOT_E2E_LIBVIRT_KVM_GID="$E2E_LIBVIRT_KVM_GID" \
-        COPILOT_E2E_LIBVIRT_RUNTIME_DIR="$E2E_LIBVIRT_RUNTIME_DIR" \
-        COPILOT_E2E_LIBVIRT_CONFIG_HOME="$E2E_LIBVIRT_CONFIG_HOME" \
-        COPILOT_E2E_LIBVIRT_CACHE_HOME="$E2E_LIBVIRT_CACHE_HOME" \
-        COPILOT_E2E_LIBVIRT_DATA_HOME="$E2E_LIBVIRT_DATA_HOME" \
-        COPILOT_E2E_LIBVIRT_HOME="$E2E_LIBVIRT_HOME" \
-        AUTHD_E2E_DATA_DIR="$AUTHD_E2E_DATA_HOST_DIR" \
-        XDG_RUNTIME_DIR="$HOST_XDG_RUNTIME_DIR" \
-        /usr/bin/newgrp -c "$E2E_LIBVIRT_START_COMMAND" kvm \
-        >"$E2E_LIBVIRT_LOG" 2>&1 &
-    E2E_LIBVIRT_SCOPE_PID=$!
-
-    E2E_LIBVIRT_READY=false
-    for ((attempt = 0; attempt < 100; attempt++)); do
-        if [[ -S "$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock" ]] &&
-            e2e_libvirt_virsh list --all >/dev/null 2>&1; then
-            E2E_LIBVIRT_READY=true
-            break
-        fi
-        if ! ps -p "$E2E_LIBVIRT_SCOPE_PID" >/dev/null 2>&1 &&
-            ! systemd_user is-active --quiet "$E2E_LIBVIRT_UNIT.scope"; then
-            break
-        fi
-        sleep 0.05
-    done
-    if [[ "$E2E_LIBVIRT_READY" != true ]]; then
-        echo "error: could not initialize the AppArmor-confined E2E libvirt session" >&2
-        echo "error: install its policy with ./apparmor/install-e2e-libvirt.sh" >&2
-        if [[ -s "$E2E_LIBVIRT_LOG" ]]; then
-            cat "$E2E_LIBVIRT_LOG" >&2
-        fi
+    if ! e2e_libvirt_start_or_join; then
         exit 1
     fi
+    printf 'Connect with: virt-manager --connect %q\n' \
+        "qemu+unix:///session?socket=$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock"
 
     shopt -s nullglob
     for domain_xml in "$AUTHD_E2E_DATA_HOST_DIR"/*/*.xml; do
@@ -1282,8 +1734,9 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         fi
     done
     shopt -u nullglob
+    e2e_libvirt_unlock_manager
 
-    E2E_SUDO_HELPER_LOG="$E2E_LIBVIRT_RUNTIME_DIR/sudo-helper.log"
+    E2E_SUDO_HELPER_LOG="$(mktemp "$E2E_LIBVIRT_MANAGER_DIR/sudo-helper.XXXXXXXX")"
     "$SCRIPT_DIR/copilot-e2e-sudo-helper" \
         "$E2E_SUDO_SOCKET" \
         "$AUTHD_E2E_DATA_HOST_DIR" \
@@ -1414,6 +1867,7 @@ fi
     "${E2E_SSH_PUBLIC_KEY_PARENT_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_BIND_ARGS[@]}" \
     "${AUTHD_E2E_DATA_BIND_ARGS[@]}" \
+    "${AUTHD_E2E_SESSION_DATA_BIND_ARGS[@]}" \
     "${AUTHD_E2E_TEST_RUNS_BIND_ARGS[@]}" \
     "${AUTHD_ARTIFACTS_BIND_ARGS[@]}" \
     "${AUTHD_E2E_ARTIFACTS_BIND_ARGS[@]}" \

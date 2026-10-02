@@ -45,8 +45,8 @@ def main():
     }
     runtime_patterns = [
         re.compile(
-            re.escape(os.path.join(root, "copilot-e2e-libvirt."))
-            + r"[^/]+/libvirt/(?P<relative>.+)"
+            re.escape(os.path.join(root, "copilot-e2e-libvirt"))
+            + r"(?:\.[^/]+)?/libvirt/(?P<relative>.+)"
         )
         for root in runtime_roots
     ]

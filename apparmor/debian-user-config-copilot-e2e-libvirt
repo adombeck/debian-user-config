@@ -89,6 +89,10 @@ profile debian-user-config-copilot-e2e-libvirt @{HOME}/.local/libexec/debian-use
     /run/ rix,
     /run/user/ rix,
     /run/user/[0-9]*/ rix,
+    /run/user/[0-9]*/copilot-e2e-libvirt/ rixw,
+    /run/user/[0-9]*/copilot-e2e-libvirt/**/ rixw,
+    /run/user/[0-9]*/copilot-e2e-libvirt/** rwkl,
+    # Keep older per-launch runtimes confined while existing wrappers exit.
     /run/user/[0-9]*/copilot-e2e-libvirt.*/ rixw,
     /run/user/[0-9]*/copilot-e2e-libvirt.*/**/ rixw,
     /run/user/[0-9]*/copilot-e2e-libvirt.*/** rwkl,
@@ -181,6 +185,10 @@ profile debian-user-config-copilot-e2e-qemu flags=(attach_disconnected,mediate_d
     /run/ rix,
     /run/user/ rix,
     /run/user/[0-9]*/ rix,
+    /run/user/[0-9]*/copilot-e2e-libvirt/ rixw,
+    /run/user/[0-9]*/copilot-e2e-libvirt/**/ rixw,
+    /run/user/[0-9]*/copilot-e2e-libvirt/** rwkl,
+    # Keep older per-launch runtimes confined while existing wrappers exit.
     /run/user/[0-9]*/copilot-e2e-libvirt.*/ rixw,
     /run/user/[0-9]*/copilot-e2e-libvirt.*/**/ rixw,
     /run/user/[0-9]*/copilot-e2e-libvirt.*/** rwkl,

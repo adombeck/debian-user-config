@@ -28,4 +28,4 @@ run_root install -d -m 0755 /etc/apparmor.d
 run_root install -o root -g root -m 0644 "$POLICY_SOURCE" "$POLICY_TARGET"
 run_root apparmor_parser -r "$POLICY_TARGET"
 
-echo "Installed the AppArmor confinement for Copilot's rootless E2E libvirt session."
+echo "Installed the AppArmor confinement for Copilot's shared rootless E2E libvirt session."
