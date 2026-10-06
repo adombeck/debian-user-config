@@ -7,6 +7,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$HOME/.local/bin"
 for source in "$DIR"/*; do
     [[ "$(basename "$source")" == "install.sh" ]] && continue
+    [[ -f "$source" && -x "$source" ]] || continue
     target="$HOME/.local/bin/$(basename "$source")"
     if [[ -L "$target" ]]; then
         rm "$target"

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -z "${AUTHD_E2E_SESSION_ID:-}" ]]; then
+    exec /usr/bin/virsh "$@"
+fi
+if [[ -z "${AUTHD_E2E_SESSION_VM_HELPER:-}" ||
+    ! -f "$AUTHD_E2E_SESSION_VM_HELPER" ]]; then
+    echo "error: Copilot E2E VM hook is not mounted" >&2
+    exit 1
+fi
+
+exec /usr/bin/python3 "$AUTHD_E2E_SESSION_VM_HELPER" virsh "$@"

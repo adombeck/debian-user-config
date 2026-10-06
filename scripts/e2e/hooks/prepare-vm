@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "usage: prepare-vm VM_NAME RELEASE [FORCE]" >&2
+    exit 2
+fi
+if [[ -z "${AUTHD_E2E_SESSION_ID:-}" ||
+    -z "${AUTHD_E2E_SESSION_VM_HELPER:-}" ||
+    ! -f "$AUTHD_E2E_SESSION_VM_HELPER" ]]; then
+    echo "error: Copilot E2E VM hook is not configured" >&2
+    exit 1
+fi
+
+hook_args=(
+    restore
+    --base-vm "$1"
+    --vm "$1-copilot-${AUTHD_E2E_SESSION_ID}"
+    --vm-alias "$1"
+    --snapshot initial-setup
+    --release "$2"
+)
+case "${3:-false}" in
+    true)
+        hook_args+=(--force)
+        ;;
+    false|"")
+        ;;
+    *)
+        echo "error: FORCE must be true or false" >&2
+        exit 2
+        ;;
+esac
+
+exec /usr/bin/python3 "$AUTHD_E2E_SESSION_VM_HELPER" "${hook_args[@]}"
