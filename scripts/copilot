@@ -1420,7 +1420,6 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
     grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
     AUTHD_TEST_ENV_ARGS=(
         --setenv AUTHD_SKIP_ROOT_TESTS 1
-        --setenv AUTHD_TEST_NESTED_USERNS_MAP explicit
     )
     AUTHD_TEST_CAP_DROP_ARGS=(--cap-drop CAP_DAC_OVERRIDE)
     AUTHD_TEST_CONFIG_BIND_ARGS+=(
@@ -1485,6 +1484,11 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
 
     else
         echo "warning: subordinate UID/GID mappings are unavailable; nested authd Go tests may fail" >&2
+    fi
+    if [[ "$AUTHD_TEST_EXTENDED_USERNS" == true ]]; then
+        AUTHD_TEST_ENV_ARGS+=(--setenv AUTHD_TEST_NESTED_USERNS_MAP explicit)
+    else
+        AUTHD_TEST_ENV_ARGS+=(--setenv AUTHD_TEST_NESTED_USERNS_MAP single)
     fi
     for etc_path in \
         /etc/environment \
