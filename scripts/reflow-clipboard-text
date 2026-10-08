@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Reflow clipboard text: unwrap lines, remove indentation, preserve paragraphs,
+# fenced code blocks, and list items
+# Reads from clipboard (wl-paste) and writes result back to clipboard (wl-copy)
+
+wl-paste \
+  | awk '
+    function trim_leading(line) {
+      sub(/^[[:space:]]+/, "", line);
+      return line;
+    }
+    function flush_paragraph() {
+      if (parabuf != "") {
+        print parabuf;
+        parabuf="";
+      }
+    }
+    function flush_list_item() {
+      if (listbuf != "") {
+        print listbuf;
+        listbuf="";
+      }
+    }
+    function fence_length(line,    trimmed, ch, count) {
+      trimmed = trim_leading(line);
+      ch = substr(trimmed, 1, 1);
+      if (ch != "`" && ch != "~") return 0;
+
+      count = 0;
+      while (substr(trimmed, count + 1, 1) == ch) count++;
+      return (count >= 3 ? count : 0);
+    }
+    function is_closing_fence(line,    trimmed, ch, count, rest) {
+      trimmed = trim_leading(line);
+      ch = substr(trimmed, 1, 1);
+      if (ch != fence_char) return 0;
+
+      count = 0;
+      while (substr(trimmed, count + 1, 1) == ch) count++;
+      if (count < fence_len) return 0;
+
+      rest = substr(trimmed, count + 1);
+      return rest ~ /^[[:space:]]*$/;
+    }
+    function is_list_item(line,    trimmed) {
+      trimmed = trim_leading(line);
+      return trimmed ~ /^[-+*][[:space:]]+/ ||
+             trimmed ~ /^[0-9]+[.)][[:space:]]+/;
+    }
+    {
+      if (in_fence) {
+        print $0;
+        if (is_closing_fence($0)) in_fence=0;
+        next;
+      }
+
+      if (fence_length($0) > 0) {
+        flush_list_item();
+        flush_paragraph();
+        in_fence=1;
+        fence_char=substr(trim_leading($0), 1, 1);
+        fence_len=fence_length($0);
+        print $0;
+        next;
+      }
+
+      if ($0 ~ /^[[:space:]]*$/) { # empty line = paragraph break
+        flush_list_item();
+        flush_paragraph();
+        print "";
+        next;
+      }
+
+      normalized=trim_leading($0);
+      if (is_list_item($0)) {
+        flush_paragraph();
+        flush_list_item();
+        listbuf=normalized;
+        next;
+      }
+
+      if (listbuf != "") {
+        if ($0 ~ /^[[:space:]]+/) {
+          listbuf=listbuf " " normalized;
+          next;
+        }
+        flush_list_item();
+      }
+
+      parabuf=(parabuf=="" ? normalized : parabuf " " normalized);
+    }
+    END {
+      flush_list_item();
+      flush_paragraph();
+    }' \
+  | wl-copy
