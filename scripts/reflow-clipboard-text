@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Reflow clipboard text: unwrap lines, remove indentation, preserve paragraphs,
-# fenced code blocks, and list items
+# Reflow clipboard text: unwrap lines, remove indentation and Copilot session UI
+# chrome, preserve paragraphs, fenced code blocks, and list items
 # Reads from clipboard (wl-paste) and writes result back to clipboard (wl-copy)
 
 wl-paste \
   | awk '
+    function strip_copilot_chrome(line) {
+      if (line ~ /[[:space:]]*┃[[:space:]]*$/) {
+        sub(/[[:space:]]*┃[[:space:]]*$/, "", line);
+        sub(/[[:space:]]+[0-9][0-9]?:[0-9][0-9]$/, "", line);
+      }
+      return line;
+    }
     function trim_leading(line) {
       sub(/^[[:space:]]+/, "", line);
       return line;
@@ -48,6 +55,8 @@ wl-paste \
              trimmed ~ /^[0-9]+[.)][[:space:]]+/;
     }
     {
+      $0 = strip_copilot_chrome($0);
+
       if (in_fence) {
         print $0;
         if (is_closing_fence($0)) in_fence=0;
