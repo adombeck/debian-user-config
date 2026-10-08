@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import gi
@@ -192,7 +193,7 @@ def run_command_with_error_notification(
     return result.returncode
 
 
-def notify_claim_result(result, clipboard_content):
+def notify_claim_result(result, clipboard_content, copy_only_if_unchanged=False):
     if result.returncode != 0:
         notify("Failed to claim Jira issue", result.stderr.strip() or clipboard_content)
         return
@@ -200,15 +201,98 @@ def notify_claim_result(result, clipboard_content):
     match = JIRA_ISSUE_REGEX.search(result.stdout)
     if match:
         issue_key = match.group(0)
-        subprocess.run(["wl-copy", issue_key], check=True)
+        should_copy = True
+        if copy_only_if_unchanged:
+            try:
+                current_clipboard = subprocess.run(
+                    ["wl-paste"],
+                    stdout=subprocess.PIPE,
+                    text=True,
+                )
+            except OSError as error:
+                print(
+                    f"Could not check clipboard before copying Jira issue key: {error}",
+                    file=sys.stderr,
+                )
+                should_copy = False
+            else:
+                should_copy = (
+                    current_clipboard.returncode == 0
+                    and current_clipboard.stdout.strip() == clipboard_content
+                )
+                if current_clipboard.returncode != 0:
+                    print("Could not read clipboard; leaving it unchanged.", file=sys.stderr)
+
+        if should_copy:
+            subprocess.run(["wl-copy", issue_key], check=True)
         notify("Jira issue claimed", issue_key,
                copy_text=issue_key, copy_label=f"Copy {issue_key}")
     else:
         notify("Jira issue claimed", clipboard_content)
 
 
+def start_background_jira_claim(issue_url):
+    state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    state_dir = state_home / "authd-scripts"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    file_descriptor, log_path = tempfile.mkstemp(
+        prefix="jira-claim-",
+        suffix=".log",
+        dir=state_dir,
+    )
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--jira-claim-worker",
+        issue_url,
+        log_path,
+    ]
+
+    with os.fdopen(file_descriptor, "w", encoding="utf-8") as log_file:
+        worker = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    return worker.pid, log_path
+
+
+def run_background_jira_claim(issue_url, log_path):
+    print(f"Looking up and claiming the Jira issue for {issue_url}", flush=True)
+    try:
+        result = subprocess.run(
+            [str(JIRA_CLAIM_ISSUE_SCRIPT), issue_url],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        result = subprocess.CompletedProcess(
+            [str(JIRA_CLAIM_ISSUE_SCRIPT), issue_url],
+            1,
+            "",
+            str(error),
+        )
+
+    with open(log_path, "a", encoding="utf-8") as log_file:
+        log_file.write(result.stdout)
+        log_file.write(result.stderr)
+
+    notify_claim_result(
+        result,
+        issue_url,
+        copy_only_if_unchanged=True,
+    )
+
+
 def main():
     Notify.init("local.magic-shortcut")
+
+    if len(sys.argv) == 4 and sys.argv[1] == "--jira-claim-worker":
+        run_background_jira_claim(sys.argv[2], sys.argv[3])
+        return
 
     path, line_number = None, None
 
@@ -267,14 +351,31 @@ def main():
         return
 
     # If the clipboard content is a GitHub issue URL for a canonical repo,
-    # call the jira-claim-issue script if it exists, then run fix-issue
+    # prepare its worktree, then claim Jira in the background.
     if GITHUB_CANONICAL_ISSUE_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
-        notify("Claiming Jira issue", clipboard_content)
-        result = subprocess.run([str(JIRA_CLAIM_ISSUE_SCRIPT), clipboard_content],
-                                capture_output=True, text=True)
-        if FIX_ISSUE_SCRIPT.exists():
-            subprocess.Popen([str(FIX_ISSUE_SCRIPT), clipboard_content])
-        notify_claim_result(result, clipboard_content)
+        if not FIX_ISSUE_SCRIPT.exists():
+            notify("Failed to prepare authd worktree", str(FIX_ISSUE_SCRIPT))
+            return
+
+        if run_command_with_error_notification(
+            [str(FIX_ISSUE_SCRIPT), clipboard_content],
+            "Preparing authd worktree",
+            clipboard_content,
+            "Failed to prepare authd worktree",
+        ) != 0:
+            return
+
+        try:
+            worker_pid, log_path = start_background_jira_claim(clipboard_content)
+        except OSError as error:
+            print(error, file=sys.stderr)
+            notify("Failed to start Jira claim", str(error))
+            return
+
+        notify(
+            "Worktree ready; Jira claim running",
+            f"PID: {worker_pid}\nLog: {log_path}",
+        )
         return
 
     # If the clipboard content is a URL to a GitHub PR review comment or a
