@@ -36,7 +36,8 @@ FIX_ISSUE_SCRIPT = Path("~/projects/authd-scripts/fix-issue").expanduser()
 DEBUG_CI_JOB_SCRIPT = Path("~/projects/authd-scripts/debug-ci-job").expanduser()
 DEBUG_CI_E2E_TEST_SCRIPT = Path("~/projects/authd-scripts/debug-ci-e2e-test").expanduser()
 GITHUB_REVIEW_COMMENT_URL_REGEX = re.compile(
-    r'https://github\.com/[^/]+/[^/]+/pull/\d+#(discussion_r\d+|issuecomment-\d+)')
+    r'https://github\.com/[^/]+/[^/]+/pull/\d+#'
+    r'(discussion_r\d+|issuecomment-\d+|pullrequestreview-\d+)')
 ADDRESS_REVIEW_COMMENT_SCRIPT = Path("~/projects/authd-scripts/address-review-comment").expanduser()
 
 AUTHD_REPO = Path("~/projects/authd").expanduser()
@@ -378,7 +379,7 @@ def main():
         )
         return
 
-    # If the clipboard content is a URL to a GitHub PR review comment or a
+    # If the clipboard content is a URL to GitHub PR review feedback or a
     # PR issue comment, call address-review-comment
     if GITHUB_REVIEW_COMMENT_URL_REGEX.match(clipboard_content) and ADDRESS_REVIEW_COMMENT_SCRIPT.exists():
         run_command_with_error_notification(
