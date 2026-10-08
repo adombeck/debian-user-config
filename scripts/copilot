@@ -30,6 +30,10 @@
 # transitions once with: ./apparmor/install.sh. It also enables nested
 # bubblewrap only for authd worktree sessions.
 #
+# Authd Go tests run as the mapped account UID with a private D-Bus session.
+# Private-mode fixtures are exposed as read-only copies, and package execution
+# is serialized to avoid exhausting the sandbox pipe quota.
+#
 # Copilot runs with a private D-Bus session and GNOME Keyring. Only its
 # dedicated keyring data under COPILOT_HOME is persisted; the host session bus,
 # keyring, and credential-agent sockets are not exposed.
@@ -1415,12 +1419,73 @@ AUTHD_TEST_CONFIG_BIND_ARGS=()
 AUTHD_TEST_ENV_ARGS=()
 AUTHD_TEST_CAP_ARGS=()
 AUTHD_TEST_CAP_DROP_ARGS=()
+AUTHD_TEST_GO_BIND_ARGS=()
+AUTHD_TEST_GO_TOOLCHAIN_DIR=
+AUTHD_TEST_RUST_BIND_ARGS=()
+AUTHD_TEST_RUST_TOOLCHAIN_DIR=
+AUTHD_TEST_CARGO_CACHE_BIND_ARGS=()
+AUTHD_TEST_PRIVATE_FIXTURE_BIND_ARGS=()
+AUTHD_TEST_PRIVATE_FIXTURE_FILES=()
+AUTHD_TEST_PRIVATE_FIXTURE_DIR=
 CRACKLIB_BIND_ARGS=()
+
+cleanup_authd_test_private_fixtures() {
+    local fixture_file
+    for fixture_file in "${AUTHD_TEST_PRIVATE_FIXTURE_FILES[@]}"; do
+        rm -f -- "$fixture_file"
+    done
+    if [[ -n "$AUTHD_TEST_PRIVATE_FIXTURE_DIR" ]]; then
+        rmdir -- "$AUTHD_TEST_PRIVATE_FIXTURE_DIR"
+    fi
+}
+
 if [[ -f "$MOUNT_DIR/go.mod" ]] &&
     grep -q '^module github.com/canonical/authd$' "$MOUNT_DIR/go.mod"; then
     AUTHD_TEST_ENV_ARGS=(
         --setenv AUTHD_SKIP_ROOT_TESTS 1
     )
+    if command -v go >/dev/null 2>&1 &&
+        AUTHD_TEST_GO_TOOLCHAIN_DIR="$(cd "$MOUNT_DIR" && go env GOROOT 2>/dev/null)" &&
+        [[ -x "$AUTHD_TEST_GO_TOOLCHAIN_DIR/bin/go" ]]; then
+        AUTHD_TEST_GO_TOOLCHAIN_DIR="$(realpath "$AUTHD_TEST_GO_TOOLCHAIN_DIR")"
+        AUTHD_TEST_GO_BIND_ARGS=(
+            --dir /opt
+            --ro-bind "$AUTHD_TEST_GO_TOOLCHAIN_DIR" /opt/copilot-go-toolchain
+            --dir /workspace
+            --bind "$MOUNT_DIR" /workspace/authd
+        )
+        AUTHD_TEST_ENV_ARGS+=(
+            --setenv AUTHD_TEST_GO_TOOLCHAIN /opt/copilot-go-toolchain
+            --setenv AUTHD_TEST_REPO_ROOT "$MOUNT_DIR"
+            --setenv AUTHD_TEST_REPO_ALIAS /workspace/authd
+            --setenv AUTHD_TEST_USER_NAME "${CURRENT_USER_ENTRY%%:*}"
+            --setenv AUTHD_TEST_USER_UID "$USER_ID"
+            --setenv AUTHD_TEST_USER_GID "$GROUP_ID"
+            --setenv AUTHD_TEST_CARGO_HOME "$HOME/.cargo"
+            --setenv AUTHD_TEST_RUSTUP_HOME "$HOME/.rustup"
+        )
+    fi
+    if command -v rustup >/dev/null 2>&1 &&
+        AUTHD_TEST_RUSTC_PATH="$(rustup which rustc 2>/dev/null)" &&
+        [[ -x "$AUTHD_TEST_RUSTC_PATH" ]]; then
+        AUTHD_TEST_RUST_TOOLCHAIN_DIR="$(dirname "$(dirname "$AUTHD_TEST_RUSTC_PATH")")"
+        AUTHD_TEST_RUST_TOOLCHAIN_DIR="$(realpath "$AUTHD_TEST_RUST_TOOLCHAIN_DIR")"
+        AUTHD_TEST_RUST_BIND_ARGS=(
+            --dir /opt
+            --ro-bind "$AUTHD_TEST_RUST_TOOLCHAIN_DIR" /opt/copilot-rust-toolchain
+        )
+        AUTHD_TEST_ENV_ARGS+=(--setenv AUTHD_TEST_RUST_TOOLCHAIN /opt/copilot-rust-toolchain)
+        AUTHD_TEST_CARGO_CACHE_BIND_ARGS=(
+            --dir /opt
+            --ro-bind "$CARGO_REGISTRY_CACHE_DIR" /opt/copilot-cargo-registry
+        )
+        if [[ -d "$CARGO_GIT_CACHE_DIR" ]]; then
+            AUTHD_TEST_CARGO_CACHE_BIND_ARGS+=(--ro-bind "$CARGO_GIT_CACHE_DIR" /opt/copilot-cargo-git)
+            AUTHD_TEST_ENV_ARGS+=(--setenv AUTHD_TEST_CARGO_GIT /opt/copilot-cargo-git)
+        fi
+        AUTHD_TEST_ENV_ARGS+=(--setenv AUTHD_TEST_CARGO_REGISTRY /opt/copilot-cargo-registry)
+        SANDBOX_PATH="/opt/copilot-rust-toolchain/bin:$SANDBOX_PATH"
+    fi
     AUTHD_TEST_CAP_DROP_ARGS=(--cap-drop CAP_DAC_OVERRIDE)
     AUTHD_TEST_CONFIG_BIND_ARGS+=(
         --dir /run
@@ -1478,7 +1543,9 @@ if [[ -f "$MOUNT_DIR/go.mod" ]] &&
         exec 12< <(awk -F: '$1 != "root" {print} END {print "root:1:65535"}' /etc/subuid)
         exec 13< <(awk -F: '$1 != "root" {print} END {print "root:1:65535"}' /etc/subgid)
         AUTHD_TEST_CONFIG_BIND_ARGS+=(
+            --perms 0644
             --ro-bind-data 12 /etc/subuid
+            --perms 0644
             --ro-bind-data 13 /etc/subgid
         )
 
@@ -1826,7 +1893,38 @@ if [[ "$AUTHD_TEST_EXTENDED_USERNS" == true ]]; then
     )
 fi
 
-"${BWRAP_COMMAND[@]}" \
+if [[ -n "$AUTHD_TEST_GO_TOOLCHAIN_DIR" ]]; then
+    AUTHD_TEST_PRIVATE_FIXTURE_DIR="$(mktemp -d "$COPILOT_HOME/authd-test-fixtures.XXXXXXXX")"
+    chmod 700 "$AUTHD_TEST_PRIVATE_FIXTURE_DIR"
+    private_fixture_index=0
+    while IFS= read -r -d '' private_fixture; do
+        private_fixture_copy="$AUTHD_TEST_PRIVATE_FIXTURE_DIR/$private_fixture_index"
+        if ! cp -- "$private_fixture" "$private_fixture_copy"; then
+            rm -f -- "$private_fixture_copy"
+            cleanup_authd_test_private_fixtures
+            echo "error: could not stage authd test fixture: $private_fixture" >&2
+            exit 1
+        fi
+        AUTHD_TEST_PRIVATE_FIXTURE_FILES+=("$private_fixture_copy")
+        if ! chmod 644 "$private_fixture_copy"; then
+            cleanup_authd_test_private_fixtures
+            echo "error: could not make staged authd test fixture readable" >&2
+            exit 1
+        fi
+        private_fixture_relative="${private_fixture#"$MOUNT_DIR"}"
+        AUTHD_TEST_PRIVATE_FIXTURE_BIND_ARGS+=(
+            --ro-bind "$private_fixture_copy" "/workspace/authd$private_fixture_relative"
+        )
+        private_fixture_index=$((private_fixture_index + 1))
+    done < <(
+        find "$MOUNT_DIR" \
+            -path "$MOUNT_DIR/.git" -prune -o \
+            -path "$MOUNT_DIR/authd-oidc-brokers" -prune -o \
+            -path '*/testdata/*' -type f ! -perm /044 -print0
+    )
+fi
+
+if "${BWRAP_COMMAND[@]}" \
     "${BWRAP_NAMESPACE_ARGS[@]}" \
     --die-with-parent \
     "${BWRAP_SESSION_ARGS[@]}" \
@@ -1863,8 +1961,11 @@ fi
     "${AUTHD_TEST_CONFIG_BIND_ARGS[@]}" \
     --ro-bind /etc/hosts /etc/hosts \
     "${LOCALTIME_BIND_ARGS[@]}" \
+    --perms 0644 \
     --ro-bind-data 9 /etc/passwd \
+    --perms 0644 \
     --ro-bind-data 10 /etc/group \
+    --chmod 755 /etc \
     --ro-bind "$COPILOT_BIN" "$COPILOT_BIN" \
     "${GIT_CONFIG_BIND_ARGS[@]}" \
     \
@@ -1873,6 +1974,7 @@ fi
     --bind /dev/null /dev/log \
     --proc /proc \
     --tmpfs /tmp \
+    --chmod 1777 /tmp \
     "${AUTHD_E2E_SESSION_VM_HELPER_BIND_ARGS[@]}" \
     "${X11_SOCKET_BIND_ARGS[@]}" \
     --dir /tmp/copilot-runtime \
@@ -1893,8 +1995,12 @@ fi
     \
     --bind "$PROJECTS_DIR" "$PROJECTS_DIR" \
     "${EXTRA_BIND_ARGS[@]}" \
+    "${AUTHD_TEST_GO_BIND_ARGS[@]}" \
+    "${AUTHD_TEST_RUST_BIND_ARGS[@]}" \
+    "${AUTHD_TEST_CARGO_CACHE_BIND_ARGS[@]}" \
     --bind "$COPILOT_HOME" "$COPILOT_HOME" \
     "${SHARED_CACHE_OVERLAY_ARGS[@]}" \
+    "${AUTHD_TEST_PRIVATE_FIXTURE_BIND_ARGS[@]}" \
     "${E2E_SUDO_CLIENT_BIND_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_PARENT_ARGS[@]}" \
     "${E2E_SSH_PUBLIC_KEY_BIND_ARGS[@]}" \
@@ -2049,6 +2155,100 @@ fi
             echo "warning: Git status failed; disabling Go VCS stamping and limiting Go package parallelism" >&2
         fi
 
+        if [[ -n "${AUTHD_TEST_GO_TOOLCHAIN:-}" ]]; then
+            authd_test_root=/tmp/copilot-authd-test
+            authd_test_bin_dir="$authd_test_root/bin"
+            /usr/bin/mkdir -p \
+                "$authd_test_bin_dir" \
+                "$authd_test_root/home" \
+                "$authd_test_root/cache" \
+                "$authd_test_root/config" \
+                "$authd_test_root/data" \
+                "$authd_test_root/runtime" \
+                "$authd_test_root/gocache" \
+                "$authd_test_root/gomodcache" \
+                "$authd_test_root/cargo"
+            /usr/bin/chmod 755 "$authd_test_root" "$authd_test_bin_dir"
+            for cargo_cache in registry git; do
+                cargo_cache_source="${AUTHD_TEST_CARGO_REGISTRY:-}"
+                if [[ "$cargo_cache" == git ]]; then
+                    cargo_cache_source="${AUTHD_TEST_CARGO_GIT:-}"
+                fi
+                if [[ -n "$cargo_cache_source" && -d "$cargo_cache_source" ]]; then
+                    /usr/bin/ln -s "$cargo_cache_source" "$authd_test_root/cargo/$cargo_cache"
+                fi
+            done
+            for authd_test_dir in home cache config data runtime gocache gomodcache cargo; do
+                /usr/bin/chown "$AUTHD_TEST_USER_UID:$AUTHD_TEST_USER_GID" "$authd_test_root/$authd_test_dir"
+                /usr/bin/chmod 700 "$authd_test_root/$authd_test_dir"
+            done
+
+            cat >"$authd_test_bin_dir/go" <<\COPILOT_GO
+#!/usr/bin/bash
+set -euo pipefail
+
+real_go="${AUTHD_TEST_GO_TOOLCHAIN}/bin/go"
+if [[ "${1:-}" != "test" ]]; then
+    exec "$real_go" "$@"
+fi
+
+case "$PWD" in
+    "$AUTHD_TEST_REPO_ROOT")
+        cd "$AUTHD_TEST_REPO_ALIAS"
+        ;;
+    "$AUTHD_TEST_REPO_ROOT"/*)
+        repo_subdir="${PWD#"$AUTHD_TEST_REPO_ROOT"}"
+        cd "$AUTHD_TEST_REPO_ALIAS$repo_subdir"
+        ;;
+    "$AUTHD_TEST_REPO_ALIAS"|"$AUTHD_TEST_REPO_ALIAS"/*)
+        ;;
+    *)
+        exec "$real_go" "$@"
+        ;;
+esac
+
+test_root=/tmp/copilot-authd-test
+export HOME="$test_root/home"
+export XDG_CACHE_HOME="$test_root/cache"
+export XDG_CONFIG_HOME="$test_root/config"
+export XDG_DATA_HOME="$test_root/data"
+export XDG_RUNTIME_DIR="$test_root/runtime"
+export GOCACHE="$test_root/gocache"
+export GOMODCACHE="$test_root/gomodcache"
+export CARGO_HOME="$test_root/cargo"
+export CARGO_NET_OFFLINE=true
+if [[ -n "${AUTHD_TEST_RUST_TOOLCHAIN:-}" ]]; then
+    unset RUSTUP_HOME RUSTUP_TOOLCHAIN RUSTUP_AUTO_UPDATE RUSTUP_NO_UPDATE_CHECK
+else
+    export RUSTUP_HOME="$AUTHD_TEST_RUSTUP_HOME"
+fi
+export GOROOT="$AUTHD_TEST_GO_TOOLCHAIN"
+export GOTOOLCHAIN=local
+export TMPDIR=/tmp
+export RUSTUP_AUTO_UPDATE=0
+export RUSTUP_NO_UPDATE_CHECK=1
+export USER="$AUTHD_TEST_USER_NAME"
+export LOGNAME="$AUTHD_TEST_USER_NAME"
+unset DBUS_SESSION_BUS_ADDRESS GH_TOKEN JIRA_API_TOKEN SSH_AUTH_SOCK COPILOT_HOME
+GOFLAGS="${GOFLAGS:+$GOFLAGS }-buildvcs=false -p=1"
+export GOFLAGS
+
+# Keep peer credentials non-root while retaining only sandbox-scoped capabilities.
+test_caps="cap_chown,cap_fowner,cap_fsetid,cap_setgid,cap_setuid,cap_setpcap,cap_net_bind_service,cap_net_admin,cap_sys_chroot,cap_sys_admin,cap_mknod,cap_setfcap"
+exec /usr/sbin/capsh \
+    --keep=1 \
+    --user="$AUTHD_TEST_USER_NAME" \
+    --caps="$test_caps+eip" \
+    --addamb="$test_caps" \
+    --groups=0 \
+    --noenv \
+    -- -c "exec \"\$@\"" copilot-authd-go-test \
+    /usr/bin/dbus-run-session -- "$real_go" test -p=1 "${@:2}"
+COPILOT_GO
+            /usr/bin/chmod 755 "$authd_test_bin_dir/go"
+            export PATH="$authd_test_bin_dir:$PATH"
+        fi
+
         if [[ "${COPILOT_SANDBOX_SHELL:-}" == true ]]; then
             shell_rc_dir="$(mktemp -d /tmp/copilot-runtime/shell-rc.XXXXXXXX)"
             chmod 700 "$shell_rc_dir"
@@ -2097,3 +2297,11 @@ COPILOT_RC
         fi
         exit "$status"
     ' -- "$COPILOT_BIN" "$@"
+then
+    bwrap_status=0
+else
+    bwrap_status=$?
+fi
+
+cleanup_authd_test_private_fixtures
+exit "$bwrap_status"
