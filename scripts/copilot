@@ -12,10 +12,9 @@
 # Rootless Podman may be used inside the sandbox with private storage. Host
 # Podman sockets and host container storage are never exposed.
 #
-# Libvirt is exposed through its read-only socket by default. Pass
-# --allow-e2e-tests for VM lifecycle and provisioning workflows only when
-# necessary. That profile joins a shared per-user libvirt session for E2E VMs,
-# confined by AppArmor to a dedicated data directory and the KVM/VSOCK devices.
+# Libvirt access for E2E VM lifecycle and provisioning workflows uses a shared
+# per-user session by default. That session is confined by AppArmor to a
+# dedicated data directory and the KVM/VSOCK devices.
 # It never exposes the host's system libvirt socket or system-libvirt VM files.
 # Each launch gets its own VM domain and writable qcow2 overlays; provisioned
 # snapshot disks are shared as read-only backing images. A launch only cleans
@@ -50,7 +49,7 @@
 # The first command preserves the original Copilot executable; the installer
 # then creates ~/.local/bin/copilot as a symlink to this wrapper.
 #
-# Usage: copilot [--allow-e2e-tests] [--shell] [copilot args...]
+# Usage: copilot [--shell] [copilot args...]
 
 set -euo pipefail
 
@@ -62,14 +61,10 @@ fi
 USER_ID="$(id -u)"
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
-ALLOW_E2E_TESTS=false
+E2E_TESTS_ENABLED=true
 RUN_INTERACTIVE_SHELL=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --allow-e2e-tests)
-        ALLOW_E2E_TESTS=true
-        shift
-        ;;
     --shell)
         RUN_INTERACTIVE_SHELL=true
         shift
@@ -122,14 +117,12 @@ if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
     fi
 fi
 
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
-    cat >&2 <<'EOF'
-warning: --allow-e2e-tests joins the shared AppArmor-confined per-user E2E libvirt session
+cat >&2 <<'EOF'
+warning: Copilot joins the shared AppArmor-confined per-user E2E libvirt session by default
 warning: it does not expose the host's system libvirt socket or a host root shell
 warning: a per-launch broker only allows read-only guestfish cloud-init checks
 warning: E2E snapshot backing data is shared read-only; this launch uses private VM overlays
 EOF
-fi
 
 PROJECTS_DIR="${HOME}/projects"
 COPILOT_HOME="${COPILOT_HOME:-${HOME}/.copilot}"
@@ -221,7 +214,7 @@ if [[ ! -x "$COPILOT_BIN" ]]; then
     exit 1
 fi
 
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     NO_NEW_PRIVS=
     while read -r status_name status_value _; do
         if [[ "$status_name" == NoNewPrivs: ]]; then
@@ -230,7 +223,7 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
         fi
     done </proc/self/status
     if [[ "$NO_NEW_PRIVS" == 1 ]]; then
-        echo "error: --allow-e2e-tests must be started outside a no_new_privileges sandbox to select the kvm group" >&2
+        echo "error: Copilot must be started outside a no_new_privileges sandbox to select the kvm group" >&2
         exit 1
     fi
     for helper in copilot-e2e-sudo copilot-e2e-sudo-helper copilot-e2e-rebase-libvirt-xml copilot-e2e-virsh copilot-e2e-libvirt; do
@@ -580,7 +573,7 @@ e2e_libvirt_assert_no_legacy_sessions() {
             /usr/bin/virsh -c "qemu+unix:///session?socket=$socket_path" \
                 list --all >/dev/null 2>&1; then
             echo "error: an older per-launch E2E libvirt session is still active" >&2
-            echo "error: close older --allow-e2e-tests Copilot launches before retrying" >&2
+            echo "error: close older per-launch E2E libvirt sessions before retrying" >&2
             return 1
         fi
     done
@@ -845,7 +838,7 @@ cleanup_e2e_libvirt() {
     fi
 }
 
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     HOST_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
     if [[ -L "$HOST_XDG_RUNTIME_DIR" || ! -d "$HOST_XDG_RUNTIME_DIR" ]]; then
         echo "error: invalid host XDG_RUNTIME_DIR: $HOST_XDG_RUNTIME_DIR" >&2
@@ -1670,7 +1663,7 @@ fi
 if [[ "$SSH_AGENT_ENABLED" == true ]]; then
     SANDBOX_ENV_ARGS+=(--setenv SSH_AUTH_SOCK /tmp/copilot-runtime/ssh-agent)
 fi
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_LIBVIRT_SESSION true)
     SANDBOX_ENV_ARGS+=(--setenv LIBVIRT_DEFAULT_URI 'qemu+unix:///session?socket=/var/run/libvirt/libvirt-sock')
 
@@ -1708,8 +1701,8 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
     fi
 fi
 
-# Expose read-only libvirt metadata by default. The E2E profile gets read-only
-# access to the shared private session socket directory.
+# Keep the host's read-only libvirt socket as a fallback; the default E2E
+# setup below replaces it with read-only access to the shared per-user session.
 LIBVIRT_BIND_ARGS=(--bind-try /var/run/libvirt/libvirt-sock-ro /var/run/libvirt/libvirt-sock)
 E2E_LIBVIRT_SOCKET_BIND_ARGS=()
 AUTHD_E2E_DATA_BIND_ARGS=()
@@ -1748,7 +1741,7 @@ AUTHD_E2E_ARTIFACTS_BIND_ARGS=(
 SANDBOX_ENV_ARGS+=(--setenv AUTHD_ARTIFACTS_DIR "$AUTHD_ARTIFACTS_DIR")
 SANDBOX_ENV_ARGS+=(--setenv AUTHD_E2E_ARTIFACTS_DIR "$AUTHD_E2E_ARTIFACTS_DIR")
 
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     LIBVIRT_BIND_ARGS=()
     E2E_LIBVIRT_SOCKET_BIND_ARGS=(
         --ro-bind "$E2E_LIBVIRT_SOCKET_DIR" /tmp/copilot-runtime/libvirt
@@ -1792,11 +1785,11 @@ if [[ "$ALLOW_E2E_TESTS" == true ]]; then
 fi
 
 VSOCK_DEVICE_BIND_ARGS=()
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     VSOCK_DEVICE_BIND_ARGS=(--dev-bind /dev/vsock /dev/vsock)
 fi
 
-if [[ "$ALLOW_E2E_TESTS" == true ]]; then
+if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     E2E_SUDO_SOCKET_DIR="$(mktemp -d "$COPILOT_HOME/.e2e-sudo.XXXXXXXX")"
     chmod 700 "$E2E_SUDO_SOCKET_DIR"
     E2E_SUDO_SOCKET="$E2E_SUDO_SOCKET_DIR/sock"
