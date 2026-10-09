@@ -28,7 +28,7 @@ GITHUB_AUTHD_CI_JOB_URL_REGEX = re.compile(
 AUTHD_E2E_TEST_LOG_URL_REGEX = re.compile(
     r'https://authd-e2e-test-logs\.adrian-dombeck\.workers\.dev/'
     r'(?:pr-\d+/run-\d+-\d+|[a-z][a-z0-9_-]*-(?P<event_run_id>\d+)/'
-    r'run-(?P=event_run_id)-\d+)/[^/?#]+/log\.html')
+    r'run-(?P=event_run_id)-\d+)/[^/?#]+/log\.html(?:#s\d+-s\d+)?')
 GITHUB_CANONICAL_ISSUE_REGEX = re.compile(r'https://github\.com/canonical/[^/]+/issues/\d+')
 JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d+')
 JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
@@ -319,8 +319,9 @@ def main():
     # If the clipboard content is a hosted authd e2e-test log URL, start a
     # Copilot session to debug the failed test.
     if AUTHD_E2E_TEST_LOG_URL_REGEX.fullmatch(clipboard_content) and DEBUG_CI_E2E_TEST_SCRIPT.exists():
+        log_url = clipboard_content.split("#", 1)[0]
         run_command_with_error_notification(
-            [str(DEBUG_CI_E2E_TEST_SCRIPT), clipboard_content],
+            [str(DEBUG_CI_E2E_TEST_SCRIPT), log_url],
             "Debugging authd e2e-test",
             clipboard_content,
             "Failed to debug authd e2e-test",
