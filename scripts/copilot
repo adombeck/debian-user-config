@@ -117,13 +117,6 @@ if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
     fi
 fi
 
-cat >&2 <<'EOF'
-warning: Copilot joins the shared AppArmor-confined per-user E2E libvirt session by default
-warning: it does not expose the host's system libvirt socket or a host root shell
-warning: a per-launch broker only allows read-only guestfish cloud-init checks
-warning: E2E snapshot backing data is shared read-only; this launch uses private VM overlays
-EOF
-
 PROJECTS_DIR="${HOME}/projects"
 COPILOT_HOME="${COPILOT_HOME:-${HOME}/.copilot}"
 HOST_CACHE_DIR="${HOME}/.cache"
@@ -1799,8 +1792,6 @@ if [[ "$E2E_TESTS_ENABLED" == true ]]; then
     if ! e2e_libvirt_start_or_join; then
         exit 1
     fi
-    printf 'Connect with: virt-manager --connect %q\n' \
-        "qemu+unix:///session?socket=$E2E_LIBVIRT_SOCKET_DIR/libvirt-sock"
 
     shopt -s nullglob
     for domain_xml in "$AUTHD_E2E_DATA_HOST_DIR"/*/*.xml; do
