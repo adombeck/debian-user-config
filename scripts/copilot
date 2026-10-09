@@ -1887,7 +1887,9 @@ if [[ "$E2E_TESTS_ENABLED" == true ]]; then
         release_name="$(basename "$(dirname "$domain_xml")")"
         expected_domain="$(basename "$domain_xml" .xml)-$release_name"
         if [[ "$domain_name" != "$expected_domain" ]]; then
-            echo "warning: skipping E2E VM definition with unexpected name: $domain_xml" >&2
+            if ! e2e_libvirt_virsh dominfo "$expected_domain" >/dev/null 2>&1; then
+                echo "warning: skipping E2E VM definition with unexpected name: $domain_xml" >&2
+            fi
             continue
         fi
         if ! e2e_libvirt_virsh dominfo "$domain_name" >/dev/null 2>&1 &&
