@@ -193,6 +193,10 @@ for required_command in dbus-daemon dbus-send gnome-keyring-daemon getent; do
         exit 1
     fi
 done
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: python3 not found; install Python 3" >&2
+    exit 1
+fi
 
 if ! command -v copilot >/dev/null 2>&1; then
     echo "error: copilot CLI not found on PATH" >&2
@@ -418,6 +422,9 @@ E2E_SUDO_SOCKET_DIR=
 E2E_SUDO_HELPER_PID=
 E2E_SUDO_HELPER_LOG=
 E2E_SUDO_ALLOWED_IMAGE_ROOTS=()
+COPILOT_SYSLOG_SOCKET_DIR=
+COPILOT_SYSLOG_SOCKET=
+COPILOT_SYSLOG_SINK_PID=
 E2E_SUDO_CLIENT_BIND_ARGS=()
 E2E_LIBVIRT_SOCKET_BIND_ARGS=()
 AUTHD_E2E_SESSION_VM_HELPER_BIND_ARGS=()
@@ -588,6 +595,79 @@ e2e_libvirt_validate_service() {
         return 1
     fi
     return 0
+}
+
+copilot_syslog_sink_start() {
+    local attempt
+
+    if ! COPILOT_SYSLOG_SOCKET_DIR="$(mktemp -d "$HOST_XDG_RUNTIME_DIR/copilot-syslog.XXXXXXXX")"; then
+        echo "error: could not create the private Copilot syslog directory" >&2
+        return 1
+    fi
+    COPILOT_SYSLOG_SOCKET="$COPILOT_SYSLOG_SOCKET_DIR/log"
+    if ! chmod 700 "$COPILOT_SYSLOG_SOCKET_DIR"; then
+        echo "error: could not secure the private Copilot syslog directory" >&2
+        return 1
+    fi
+
+    python3 -c '
+import socket
+import sys
+
+syslog = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+syslog.bind(sys.argv[1])
+while True:
+    syslog.recv(65535)
+' "$COPILOT_SYSLOG_SOCKET" </dev/null >/dev/null 2>&1 &
+    COPILOT_SYSLOG_SINK_PID=$!
+
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        if [[ -S "$COPILOT_SYSLOG_SOCKET" ]]; then
+            return 0
+        fi
+        if ! kill -0 "$COPILOT_SYSLOG_SINK_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+
+    echo "error: could not initialize the private Copilot syslog socket" >&2
+    return 1
+}
+
+copilot_syslog_sink_cleanup() {
+    if [[ -n "$COPILOT_SYSLOG_SINK_PID" ]]; then
+        if kill -0 "$COPILOT_SYSLOG_SINK_PID" 2>/dev/null; then
+            if ! kill "$COPILOT_SYSLOG_SINK_PID" 2>/dev/null; then
+                echo "warning: could not stop the private Copilot syslog sink" >&2
+            fi
+        fi
+        wait "$COPILOT_SYSLOG_SINK_PID" 2>/dev/null || true
+        COPILOT_SYSLOG_SINK_PID=
+    fi
+
+    if [[ -n "$COPILOT_SYSLOG_SOCKET" ]]; then
+        if [[ ! -L "$COPILOT_SYSLOG_SOCKET" && -S "$COPILOT_SYSLOG_SOCKET" ]]; then
+            if ! rm -f -- "$COPILOT_SYSLOG_SOCKET"; then
+                echo "warning: could not remove the private Copilot syslog socket" >&2
+            fi
+        elif [[ -e "$COPILOT_SYSLOG_SOCKET" || -L "$COPILOT_SYSLOG_SOCKET" ]]; then
+            echo "warning: refusing to remove an unexpected private Copilot syslog path" >&2
+        fi
+        COPILOT_SYSLOG_SOCKET=
+    fi
+
+    if [[ -n "$COPILOT_SYSLOG_SOCKET_DIR" &&
+        "$COPILOT_SYSLOG_SOCKET_DIR" == "$HOST_XDG_RUNTIME_DIR"/copilot-syslog.* ]]; then
+        if [[ -d "$COPILOT_SYSLOG_SOCKET_DIR" && ! -L "$COPILOT_SYSLOG_SOCKET_DIR" ]]; then
+            if ! rmdir -- "$COPILOT_SYSLOG_SOCKET_DIR"; then
+                echo "warning: could not remove the private Copilot syslog directory" >&2
+            fi
+        elif [[ -e "$COPILOT_SYSLOG_SOCKET_DIR" || -L "$COPILOT_SYSLOG_SOCKET_DIR" ]]; then
+            echo "warning: refusing to remove an unexpected private Copilot syslog directory" >&2
+        fi
+        COPILOT_SYSLOG_SOCKET_DIR=
+    fi
 }
 
 e2e_libvirt_start_or_join() {
@@ -829,6 +909,7 @@ cleanup_e2e_libvirt() {
         "$E2E_SUDO_HELPER_LOG" == "$E2E_LIBVIRT_MANAGER_DIR"/sudo-helper.* ]]; then
         rm -f -- "$E2E_SUDO_HELPER_LOG"
     fi
+    copilot_syslog_sink_cleanup
 }
 
 if [[ "$E2E_TESTS_ENABLED" == true ]]; then
@@ -1908,6 +1989,10 @@ if [[ -n "$AUTHD_TEST_GO_TOOLCHAIN_DIR" ]]; then
     )
 fi
 
+if ! copilot_syslog_sink_start; then
+    exit 1
+fi
+
 if "${BWRAP_COMMAND[@]}" \
     "${BWRAP_NAMESPACE_ARGS[@]}" \
     --die-with-parent \
@@ -1955,7 +2040,7 @@ if "${BWRAP_COMMAND[@]}" \
     \
     --dev /dev \
     "${VSOCK_DEVICE_BIND_ARGS[@]}" \
-    --bind /dev/null /dev/log \
+    --bind "$COPILOT_SYSLOG_SOCKET" /dev/log \
     --proc /proc \
     --tmpfs /tmp \
     --chmod 1777 /tmp \
