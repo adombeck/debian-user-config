@@ -2296,7 +2296,7 @@ COPILOT_RC
             status=$?
         fi
         exit "$status"
-    ' -- "$COPILOT_BIN" "$@"
+    ' -- "$COPILOT_BIN" --allow-all "$@"
 then
     bwrap_status=0
 else
