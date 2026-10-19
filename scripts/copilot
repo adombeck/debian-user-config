@@ -1385,7 +1385,9 @@ if [[ -n "$SSH_AGENT_SOCKET" ]]; then
     SSH_AGENT_ENABLED=true
 fi
 
-# Expose SSH host keys without exposing the rest of ~/.ssh.
+# Expose SSH host keys without exposing the rest of ~/.ssh. OpenSSH uses the
+# home from /etc/passwd, so sandbox processes running as root need the trust
+# file under root's home too.
 SSH_KNOWN_HOSTS="$HOME/.ssh/known_hosts"
 SSH_KNOWN_HOSTS_BIND_ARGS=()
 if [[ -L "$SSH_KNOWN_HOSTS" ]]; then
@@ -1397,6 +1399,21 @@ elif [[ -e "$SSH_KNOWN_HOSTS" ]]; then
         exit 1
     fi
     SSH_KNOWN_HOSTS_BIND_ARGS=(--ro-bind "$SSH_KNOWN_HOSTS" "$SSH_KNOWN_HOSTS")
+    if ! SSH_ROOT_HOME="$(getent passwd 0 | cut -d: -f6)" ||
+        [[ "$SSH_ROOT_HOME" != /* ]]; then
+        echo "error: could not resolve root's home for SSH known_hosts" >&2
+        exit 1
+    fi
+    if [[ "$SSH_ROOT_HOME" != "$HOME" ]]; then
+        SSH_ROOT_SSH_DIR="${SSH_ROOT_HOME%/}/.ssh"
+        if [[ "$SSH_ROOT_HOME" != "/" ]]; then
+            SSH_KNOWN_HOSTS_BIND_ARGS+=(--dir "$SSH_ROOT_HOME")
+        fi
+        SSH_KNOWN_HOSTS_BIND_ARGS+=(
+            --dir "$SSH_ROOT_SSH_DIR"
+            --ro-bind "$SSH_KNOWN_HOSTS" "$SSH_ROOT_SSH_DIR/known_hosts"
+        )
+    fi
 fi
 
 # Expose the native Wayland clipboard connection without exposing the host
