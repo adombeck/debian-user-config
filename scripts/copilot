@@ -12,6 +12,17 @@
 # Rootless Podman may be used inside the sandbox with private storage. Host
 # Podman sockets and host container storage are never exposed.
 #
+# With --private-lxd, a separate rootless LXD service handles containers.
+# Its user, mount, PID and network namespaces hide host management sockets and
+# home files outside ~/projects. Its root maps to the caller, not host root.
+# Build containers share that outer user namespace and keep its AppArmor label.
+# A stacked child AppArmor namespace lets nested snapd load its own policies
+# without changing host policy. Snapcraft uses a separate shared scratch home.
+# The service uses delegated cgroups and user-mode networking, with an 8 GiB
+# memory limit, four CPUs and 4096 tasks. State and build caches persist under
+# ~/.local/share/copilot-lxd. The last sandbox client stops the service.
+# Install its policy once with: sudo ./apparmor/install-lxd.sh.
+#
 # Libvirt access for E2E VM lifecycle and provisioning workflows uses a shared
 # per-user session by default. That session is confined by AppArmor to a
 # dedicated data directory and the KVM/VSOCK devices.
@@ -49,7 +60,7 @@
 # The first command preserves the original Copilot executable; the installer
 # then creates ~/.local/bin/copilot as a symlink to this wrapper.
 #
-# Usage: copilot [--shell] [copilot args...]
+# Usage: copilot [--private-lxd] [--shell] [copilot args...]
 
 set -euo pipefail
 
@@ -63,10 +74,15 @@ SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 E2E_TESTS_ENABLED=true
 RUN_INTERACTIVE_SHELL=false
+PRIVATE_LXD_ENABLED=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
     --shell)
         RUN_INTERACTIVE_SHELL=true
+        shift
+        ;;
+    --private-lxd)
+        PRIVATE_LXD_ENABLED=true
         shift
         ;;
     *)
@@ -813,6 +829,9 @@ e2e_libvirt_start_or_join() {
 }
 
 cleanup_e2e_libvirt() {
+    if declare -F cleanup_private_lxd >/dev/null; then
+        cleanup_private_lxd
+    fi
     if [[ -n "$E2E_LIBVIRT_MANAGER_LOCK" ]] &&
         e2e_libvirt_lock_manager; then
         if ! e2e_libvirt_release_lease; then
@@ -2018,6 +2037,13 @@ if ! copilot_syslog_sink_start; then
     exit 1
 fi
 
+PRIVATE_LXD_BIND_ARGS=()
+if [[ "$PRIVATE_LXD_ENABLED" == true ]]; then
+    # shellcheck source=lxd/manager.sh
+    source "$SCRIPT_DIR/lxd/manager.sh"
+    start_private_lxd
+fi
+
 if "${BWRAP_COMMAND[@]}" \
     "${BWRAP_NAMESPACE_ARGS[@]}" \
     --die-with-parent \
@@ -2074,6 +2100,7 @@ if "${BWRAP_COMMAND[@]}" \
     --dir /tmp/copilot-runtime \
     --chmod 700 /tmp/copilot-runtime \
     --dir /tmp/copilot-runtime/tmp \
+    "${PRIVATE_LXD_BIND_ARGS[@]}" \
     --dir /sys \
     --dir /sys/kernel \
     --dir /sys/fs \

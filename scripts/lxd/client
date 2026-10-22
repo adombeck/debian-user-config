@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+payload=/snap/lxd/current
+LD_LIBRARY_PATH="$payload/lib:$payload/lib/$(uname -m)-linux-gnu"
+export LD_LIBRARY_PATH
+exec "$payload/sbin/lxd" "$@"

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export HOME="${COPILOT_SNAPCRAFT_HOME:?private Snapcraft home is not configured}"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_STATE_HOME="$HOME/.local/state"
+exec /snap/snapcraft/current/bin/snapcraft "$@"

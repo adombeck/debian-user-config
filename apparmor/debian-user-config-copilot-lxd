@@ -1,0 +1,33 @@
+abi <abi/4.0>,
+
+include <tunables/global>
+
+# This executable is entered only after the launcher creates a rootless user
+# namespace. Bubblewrap limits its filesystem and creates private networking.
+profile debian-user-config-copilot-lxd @{HOME}/.local/libexec/debian-user-config/copilot-lxd-bwrap flags=(attach_disconnected,mediate_deleted) {
+    capability,
+    userns,
+    network,
+    unix,
+    mount,
+    remount,
+    umount,
+    pivot_root,
+    ptrace,
+    signal,
+    change_profile -> debian-user-config-copilot-lxd,
+    change_profile -> ":copilot-lxd://*",
+    change_profile -> ":copilot-lxd:*",
+    change_profile -> "&:copilot-lxd:*",
+
+    # LXC's sealed memfd re-exec is reported as "/" after disconnection.
+    / rix,
+    /** rwkl,
+    /** mr,
+    /** ix,
+}
+
+# Create the child policy namespace. Its policies cannot replace the outer
+# profile. The service stacks this namespace onto the outer profile.
+profile ":copilot-lxd:bootstrap" {
+}
