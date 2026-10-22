@@ -128,7 +128,7 @@ start_private_lxd() {
 }
 
 configure_private_lxd_profile() {
-    private_lxd_client --project "$1" profile edit default <<'EOF'
+    private_lxd_client --project "$1" profile edit default <<EOF
 config:
   boot.autostart: "false"
   # Root is already mapped to the host user by the outer namespace.
@@ -152,6 +152,11 @@ devices:
     type: unix-char
     source: /dev/fuse
     path: /dev/fuse
+  snapcraft-launcher:
+    type: disk
+    source: $SCRIPT_DIR/lxd/snapcraft
+    path: /usr/local/bin/snapcraft
+    readonly: "true"
 EOF
 }
 

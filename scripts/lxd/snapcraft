@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HOME="${COPILOT_SNAPCRAFT_HOME:?private Snapcraft home is not configured}"
-export XDG_CACHE_HOME="$HOME/.cache"
-export XDG_CONFIG_HOME="$HOME/.config"
-export XDG_STATE_HOME="$HOME/.local/state"
+if [[ "${CRAFT_MANAGED_MODE:-}" != 1 ]]; then
+    export HOME="${COPILOT_SNAPCRAFT_HOME:?private Snapcraft home is not configured}"
+    export XDG_CACHE_HOME="$HOME/.cache"
+    export XDG_CONFIG_HOME="$HOME/.config"
+    export XDG_STATE_HOME="$HOME/.local/state"
+fi
+
+# Keep the outer sandbox's capabilities under NoNewPrivs. snap-confine drops
+# capabilities that APT needs inside the managed build container.
+export PATH="/snap/snapcraft/current/libexec/snapcraft:$PATH"
 exec /snap/snapcraft/current/bin/snapcraft "$@"

@@ -9,6 +9,48 @@ import uuid
 from pathlib import Path
 
 
+class SnapcraftLauncherTests(unittest.TestCase):
+    def launch(self, environment):
+        launcher = Path(__file__).resolve().parents[1] / "scripts/lxd/snapcraft"
+        result = subprocess.run(
+            [
+                "/usr/bin/bash",
+                "-euc",
+                """
+exec() {
+    printf '%s\\n' "$HOME" "${XDG_CACHE_HOME-}" "$PATH" "$@"
+}
+source "$1" --version
+""",
+                "--",
+                str(launcher),
+            ],
+            env={"PATH": "/usr/bin:/bin", **environment},
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        return result.stdout.splitlines()
+
+    def test_managed_launcher_keeps_container_home_without_host_config(self):
+        home, cache, path, command, argument = self.launch(
+            {"CRAFT_MANAGED_MODE": "1", "HOME": "/root", "XDG_CACHE_HOME": "/cache"}
+        )
+        self.assertEqual(home, "/root")
+        self.assertEqual(cache, "/cache")
+        self.assertEqual(path.split(":")[0], "/snap/snapcraft/current/libexec/snapcraft")
+        self.assertEqual(command, "/snap/snapcraft/current/bin/snapcraft")
+        self.assertEqual(argument, "--version")
+
+    def test_host_launcher_keeps_snapcraft_state_private(self):
+        home, cache, _, _, _ = self.launch(
+            {"HOME": "/home/user", "COPILOT_SNAPCRAFT_HOME": "/private/snapcraft"}
+        )
+        self.assertEqual(home, "/private/snapcraft")
+        self.assertEqual(cache, "/private/snapcraft/.cache")
+
+
 @unittest.skipUnless(
     os.environ.get("COPILOT_TEST_PRIVATE_LXD") == "1",
     "set COPILOT_TEST_PRIVATE_LXD=1 while the private service is running",
