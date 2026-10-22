@@ -12,7 +12,7 @@
 # Rootless Podman may be used inside the sandbox with private storage. Host
 # Podman sockets and host container storage are never exposed.
 #
-# With --private-lxd, a separate rootless LXD service handles containers.
+# A shared rootless LXD service handles containers by default, like libvirt.
 # Its user, mount, PID and network namespaces hide host management sockets and
 # home files outside ~/projects. Its root maps to the caller, not host root.
 # Build containers share that outer user namespace and keep its AppArmor label.
@@ -60,7 +60,8 @@
 # The first command preserves the original Copilot executable; the installer
 # then creates ~/.local/bin/copilot as a symlink to this wrapper.
 #
-# Usage: copilot [--private-lxd] [--shell] [copilot args...]
+# Usage: copilot [--shell] [copilot args...]
+# --private-lxd is still accepted for compatibility with older invocations.
 
 set -euo pipefail
 
@@ -74,7 +75,7 @@ SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 E2E_TESTS_ENABLED=true
 RUN_INTERACTIVE_SHELL=false
-PRIVATE_LXD_ENABLED=false
+PRIVATE_LXD_ENABLED=true
 while [[ $# -gt 0 ]]; do
     case "$1" in
     --shell)
