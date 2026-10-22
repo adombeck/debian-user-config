@@ -2045,6 +2045,8 @@ if [[ "$PRIVATE_LXD_ENABLED" == true ]]; then
     start_private_lxd
 fi
 
+# Mask the console that --dev would otherwise bind to Copilot's terminal.
+# Nested systemd instances must not write to it or change its input settings.
 if "${BWRAP_COMMAND[@]}" \
     "${BWRAP_NAMESPACE_ARGS[@]}" \
     --die-with-parent \
@@ -2091,6 +2093,7 @@ if "${BWRAP_COMMAND[@]}" \
     "${GIT_CONFIG_BIND_ARGS[@]}" \
     \
     --dev /dev \
+    --dev-bind /dev/null /dev/console \
     "${VSOCK_DEVICE_BIND_ARGS[@]}" \
     --bind "$COPILOT_SYSLOG_SOCKET" /dev/log \
     --proc /proc \
