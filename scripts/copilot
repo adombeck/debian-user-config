@@ -332,12 +332,18 @@ if command -v podman >/dev/null 2>&1; then
     SANDBOX_PATH="$PODMAN_BIN_DIR:$SANDBOX_PATH"
 fi
 
-# A snap launcher needs snapd, which is intentionally not exposed in the
-# sandbox. Use the uv payload directly when uv is installed from its snap.
-UV_COMMAND="$(command -v uv 2>/dev/null || true)"
-if [[ "$UV_COMMAND" == /snap/bin/uv && -x /snap/astral-uv/current/bin/uv ]]; then
-    SANDBOX_PATH="/snap/astral-uv/current/bin:$SANDBOX_PATH"
-fi
+# Snap launchers need snapd, which is not exposed in the sandbox. Use these
+# CLI payloads directly. This does not expose the host's LXD socket.
+for snap_tool in uv:astral-uv lxc:lxd snapcraft:snapcraft; do
+    snap_tool_name="${snap_tool%%:*}"
+    snap_name="${snap_tool#*:}"
+    snap_tool_command="$(command -v "$snap_tool_name" 2>/dev/null || true)"
+    snap_tool_payload="/snap/$snap_name/current/bin/$snap_tool_name"
+    if [[ "$snap_tool_command" == "/snap/bin/$snap_tool_name" &&
+        -x "$snap_tool_payload" ]]; then
+        SANDBOX_PATH="$(dirname "$snap_tool_payload"):$SANDBOX_PATH"
+    fi
+done
 
 # Build bind args for Copilot's own state, creating it first so bwrap has
 # something to bind (bwrap --bind requires the source to exist).
@@ -2069,6 +2075,7 @@ if "${BWRAP_COMMAND[@]}" \
     --chmod 700 /tmp/copilot-runtime \
     --dir /tmp/copilot-runtime/tmp \
     --dir /sys \
+    --dir /sys/kernel \
     --dir /sys/fs \
     --dir /sys/fs/cgroup \
     "${DPKG_STATE_BIND_ARGS[@]}" \
