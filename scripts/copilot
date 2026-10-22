@@ -2112,6 +2112,7 @@ if "${BWRAP_COMMAND[@]}" \
     "${DPKG_STATE_BIND_ARGS[@]}" \
     "${CRACKLIB_BIND_ARGS[@]}" \
     --dir /var/run/libvirt \
+    --chmod 755 /var \
     "${AUTHD_E2E_TEST_RUNS_PARENT_ARGS[@]}" \
     "${LIBVIRT_BIND_ARGS[@]}" \
     "${E2E_LIBVIRT_SOCKET_BIND_ARGS[@]}" \
