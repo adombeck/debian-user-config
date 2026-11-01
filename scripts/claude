@@ -141,7 +141,7 @@ exec bwrap \
     --ro-bind-try "${HOME}/.ssh/config" "${HOME}/.ssh/config" \
     --ro-bind-try "${HOME}/.ssh/known_hosts" "${HOME}/.ssh/known_hosts" \
     --ro-bind-try "${HOME}/.config/gh" "${HOME}/.config/gh" \
-    --ro-bind-try "${HOME}/.config/glab-cli/config.yml" "${HOME}/.config/glab-cli/config.yml" \
+    --ro-bind-try "${HOME}/.config/glab-cli" "${HOME}/.config/glab-cli" \
     --ro-bind-try /etc/alternatives /etc/alternatives \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
     --ro-bind /etc/ssl /etc/ssl \
