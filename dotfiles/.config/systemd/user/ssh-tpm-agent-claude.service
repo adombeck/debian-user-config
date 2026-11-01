@@ -1,0 +1,9 @@
+[Unit]
+Description=ssh-tpm-agent instance holding only Claude's keys
+Requires=ssh-tpm-agent-claude.socket
+
+[Service]
+Environment=SSH_TPM_AUTH_SOCK=%t/ssh-tpm-agent-claude.sock
+ExecStart=/usr/bin/ssh-tpm-agent --key-dir %h/.config/claude-ssh
+SuccessExitStatus=2
+Type=simple

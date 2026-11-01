@@ -118,6 +118,9 @@ if [[ -S "$TPM_AGENT_SOCK" && -f "$TPM_SIGNING_PUB" ]]; then
     fi
     # ssh-keygen -Y sign needs the public key file for the signing key.
     SIGNING_ARGS+=(--ro-bind "$TPM_SIGNING_PUB" "$TPM_SIGNING_PUB")
+else
+    echo "claude: ssh/signing disabled (missing $TPM_AGENT_SOCK or $TPM_SIGNING_PUB;" \
+        "try: systemctl --user enable --now ssh-tpm-agent-claude.socket)" >&2
 fi
 
 exec bwrap \

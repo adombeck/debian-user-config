@@ -1,0 +1,10 @@
+[Unit]
+Description=SSH TPM agent socket for the Claude sandbox
+
+[Socket]
+ListenStream=%t/ssh-tpm-agent-claude.sock
+SocketMode=0600
+Service=ssh-tpm-agent-claude.service
+
+[Install]
+WantedBy=sockets.target
