@@ -124,6 +124,19 @@ else
         "try: systemctl --user enable --now ssh-tpm-agent-claude.socket)" >&2
 fi
 
+# gh keeps its tokens in the keyring, which the sandbox can't reach, so hand it
+# the active account's token via the environment (inherited by bwrap rather than
+# passed with --setenv, which would expose it in the process list). Note this
+# gives the sandbox the same scopes as the host's active gh account.
+if command -v gh >/dev/null 2>&1; then
+    if GH_TOKEN="$(gh auth token 2>/dev/null)" && [[ -n "$GH_TOKEN" ]]; then
+        export GH_TOKEN
+    else
+        unset GH_TOKEN
+        echo "claude: gh not authenticated on host; gh will be unauthenticated in the sandbox" >&2
+    fi
+fi
+
 exec bwrap \
     --unshare-all \
     --share-net \
