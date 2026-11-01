@@ -81,7 +81,8 @@ touch "$CLAUDE_JSON"
 # the private keys never leave the TPM and the user's own keys in ~/.ssh are
 # not mounted. The signing config is passed via GIT_CONFIG_* env vars so the
 # user's own commits keep their normal signing setup. Skipped entirely unless
-# both the socket and the signing public key exist.
+# both the socket and the signing public key exist. The agent is started by
+# socket activation from ssh-tpm-agent-claude.socket (dotfiles/.config/systemd/user).
 TPM_AGENT_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-tpm-agent-claude.sock"
 TPM_SIGNING_PUB="${HOME}/.config/claude-ssh/id_ecdsa_claude_signing.pub"
 TPM_ALLOWED_SIGNERS="${HOME}/.config/git/allowed_signers"
