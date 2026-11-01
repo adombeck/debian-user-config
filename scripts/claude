@@ -16,8 +16,18 @@
 # then creates ~/.local/bin/claude as a symlink to this wrapper.
 #
 # Usage: ./claude [claude args...]
+#        ./claude --shell [bash args...]   # interactive shell in the sandbox
+#
+# --shell must be the first argument; it starts bash inside the same sandbox
+# instead of Claude, which is handy for inspecting what the sandbox exposes.
 
 set -euo pipefail
+
+SANDBOX_CMD=()
+if [[ "${1:-}" == "--shell" ]]; then
+    shift
+    SANDBOX_CMD=(/bin/bash "$@")
+fi
 
 PROJECTS_DIR="${HOME}/projects"
 CLAUDE_CONFIG_DIR="${HOME}/.claude"
@@ -63,6 +73,7 @@ fi
 
 CLAUDE_DIR="$(dirname "$(command -v claude)")"
 CLAUDE_BIN="${CLAUDE_DIR}/claude.real"
+[[ ${#SANDBOX_CMD[@]} -gt 0 ]] || SANDBOX_CMD=("$CLAUDE_BIN" "$@")
 
 if [[ ! -x "$CLAUDE_BIN" ]]; then
     echo "error: $CLAUDE_BIN not found or not executable" >&2
@@ -179,4 +190,4 @@ exec bwrap \
     --setenv PATH "$PATH" \
     \
     --chdir "$WORKDIR" \
-    "$CLAUDE_BIN" "$@"
+    "${SANDBOX_CMD[@]}"
