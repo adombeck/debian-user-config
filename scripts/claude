@@ -75,12 +75,13 @@ mkdir -p "$CLAUDE_CONFIG_DIR"
 touch "$CLAUDE_JSON"
 
 # Sign commits without interaction using a TPM-bound key served by
-# ssh-tpm-agent. Only the agent socket and the public key are exposed; the
-# private key never leaves the TPM. The signing config is passed via
+# a dedicated ssh-tpm-agent instance that only loads the signing key from
+# ~/.config/claude-signing. Only the agent socket and the public key are
+# exposed; the private key never leaves the TPM. The signing config is passed via
 # GIT_CONFIG_* env vars so the user's own commits keep their normal signing
 # setup. Skipped entirely unless both the socket and the public key exist.
-TPM_AGENT_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-tpm-agent.sock"
-TPM_SIGNING_PUB="${HOME}/.ssh/id_ecdsa_claude_signing.pub"
+TPM_AGENT_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-tpm-agent-claude.sock"
+TPM_SIGNING_PUB="${HOME}/.config/claude-signing/id_ecdsa_claude_signing.pub"
 TPM_ALLOWED_SIGNERS="${HOME}/.config/git/allowed_signers"
 SIGNING_ARGS=()
 if [[ -S "$TPM_AGENT_SOCK" && -f "$TPM_SIGNING_PUB" ]]; then
