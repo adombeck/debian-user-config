@@ -15,18 +15,55 @@
 # The first command preserves the original Claude executable; the installer
 # then creates ~/.local/bin/claude as a symlink to this wrapper.
 #
-# Usage: ./claude [claude args...]
-#        ./claude --shell [bash args...]   # interactive shell in the sandbox
+# Use --shell to open the calling Bash or Zsh inside the sandbox for debugging.
 #
-# --shell must be the first argument; it starts bash inside the same sandbox
-# instead of Claude, which is handy for inspecting what the sandbox exposes.
+# Usage: claude [--shell] [claude args...]
 
 set -euo pipefail
 
-SANDBOX_CMD=()
+RUN_INTERACTIVE_SHELL=false
 if [[ "${1:-}" == "--shell" ]]; then
+    RUN_INTERACTIVE_SHELL=true
     shift
-    SANDBOX_CMD=(/bin/bash "$@")
+fi
+
+if [[ "$RUN_INTERACTIVE_SHELL" == true && $# -gt 0 ]]; then
+    echo "error: --shell cannot be combined with Claude arguments" >&2
+    exit 2
+fi
+
+INTERACTIVE_SHELL_PATH=
+if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
+    PARENT_SHELL_PATH="$(readlink -f "/proc/$PPID/exe" 2>/dev/null || true)"
+    for shell_candidate in "$PARENT_SHELL_PATH" "${SHELL:-}"; do
+        [[ -n "$shell_candidate" ]] || continue
+        if [[ "$shell_candidate" != /* ]]; then
+            shell_candidate="$(command -v "$shell_candidate" 2>/dev/null || true)"
+        fi
+        [[ -n "$shell_candidate" ]] || continue
+
+        case "${shell_candidate##*/}" in
+        bash|zsh)
+            ;;
+        *)
+            continue
+            ;;
+        esac
+
+        resolved_shell="$(realpath -e "$shell_candidate" 2>/dev/null || true)"
+        [[ -n "$resolved_shell" && -x "$resolved_shell" ]] || continue
+        case "$resolved_shell" in
+        /bin/*|/usr/*|/snap/*|"$HOME"/.local/bin/*)
+            INTERACTIVE_SHELL_PATH="$resolved_shell"
+            break
+            ;;
+        esac
+    done
+
+    if [[ -z "$INTERACTIVE_SHELL_PATH" ]]; then
+        echo "error: --shell could not find an accessible Bash or Zsh executable" >&2
+        exit 1
+    fi
 fi
 
 PROJECTS_DIR="${HOME}/projects"
@@ -73,7 +110,6 @@ fi
 
 CLAUDE_DIR="$(dirname "$(command -v claude)")"
 CLAUDE_BIN="${CLAUDE_DIR}/claude.real"
-[[ ${#SANDBOX_CMD[@]} -gt 0 ]] || SANDBOX_CMD=("$CLAUDE_BIN" "$@")
 
 if [[ ! -x "$CLAUDE_BIN" ]]; then
     echo "error: $CLAUDE_BIN not found or not executable" >&2
@@ -148,11 +184,19 @@ if command -v gh >/dev/null 2>&1; then
     fi
 fi
 
+# Interactive shells need the caller's terminal session for job control.
+SESSION_ARGS=(--new-session)
+SANDBOX_CMD=("$CLAUDE_BIN" "$@")
+if [[ "$RUN_INTERACTIVE_SHELL" == true ]]; then
+    SESSION_ARGS=()
+    SANDBOX_CMD=("$INTERACTIVE_SHELL_PATH" -i)
+fi
+
 exec bwrap \
     --unshare-all \
     --share-net \
     --die-with-parent \
-    --new-session \
+    "${SESSION_ARGS[@]}" \
     \
     --ro-bind /usr /usr \
     --ro-bind /bin /bin \
