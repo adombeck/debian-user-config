@@ -102,6 +102,22 @@ if [[ -S "$TPM_AGENT_SOCK" && -f "$TPM_SIGNING_PUB" ]]; then
     )
     [[ -f "$TPM_ALLOWED_SIGNERS" ]] &&
         SIGNING_ARGS+=(--ro-bind "$TPM_ALLOWED_SIGNERS" "$TPM_ALLOWED_SIGNERS")
+
+    # The user's ~/.ssh/config pins IdentityFile/IdentityAgent per host, which
+    # overrides SSH_AUTH_SOCK and points at keys/sockets that don't exist in the
+    # sandbox. Bind a filtered copy over it: keep the Host/Hostname/Port aliases,
+    # drop the identity settings, and send everything to Claude's agent.
+    SANDBOX_SSH_CONFIG="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/claude-ssh-config"
+    if [[ -f "${HOME}/.ssh/config" ]]; then
+        {
+            grep -v -i -E '^[[:space:]]*(IdentityFile|IdentityAgent|IdentitiesOnly|AddKeysToAgent)\b' \
+                "${HOME}/.ssh/config"
+            printf '\nHost *\n    IdentityAgent %s\n' "$TPM_AGENT_SOCK"
+        } >"$SANDBOX_SSH_CONFIG"
+        SIGNING_ARGS+=(--ro-bind "$SANDBOX_SSH_CONFIG" "${HOME}/.ssh/config")
+    fi
+    # ssh-keygen -Y sign needs the public key file for the signing key.
+    SIGNING_ARGS+=(--ro-bind "$TPM_SIGNING_PUB" "$TPM_SIGNING_PUB")
 fi
 
 exec bwrap \
