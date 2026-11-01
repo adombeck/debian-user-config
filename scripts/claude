@@ -74,14 +74,16 @@ fi
 mkdir -p "$CLAUDE_CONFIG_DIR"
 touch "$CLAUDE_JSON"
 
-# Sign commits without interaction using a TPM-bound key served by
-# a dedicated ssh-tpm-agent instance that only loads the signing key from
-# ~/.config/claude-signing. Only the agent socket and the public key are
-# exposed; the private key never leaves the TPM. The signing config is passed via
-# GIT_CONFIG_* env vars so the user's own commits keep their normal signing
-# setup. Skipped entirely unless both the socket and the public key exist.
+# Let Claude sign commits and authenticate over SSH (git push, ssh) without
+# interaction, using TPM-bound keys served by a dedicated ssh-tpm-agent
+# instance that only loads the keys in ~/.config/claude-ssh (a signing key and
+# an auth key). Only the agent socket and the signing public key are exposed;
+# the private keys never leave the TPM and the user's own keys in ~/.ssh are
+# not mounted. The signing config is passed via GIT_CONFIG_* env vars so the
+# user's own commits keep their normal signing setup. Skipped entirely unless
+# both the socket and the signing public key exist.
 TPM_AGENT_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-tpm-agent-claude.sock"
-TPM_SIGNING_PUB="${HOME}/.config/claude-signing/id_ecdsa_claude_signing.pub"
+TPM_SIGNING_PUB="${HOME}/.config/claude-ssh/id_ecdsa_claude_signing.pub"
 TPM_ALLOWED_SIGNERS="${HOME}/.config/git/allowed_signers"
 SIGNING_ARGS=()
 if [[ -S "$TPM_AGENT_SOCK" && -f "$TPM_SIGNING_PUB" ]]; then
@@ -116,7 +118,8 @@ exec bwrap \
     --ro-bind-try "${HOME}/.local/bin" "${HOME}/.local/bin" \
     --ro-bind-try "${HOME}/go/bin" "${HOME}/go/bin" \
     --ro-bind-try "${HOME}/.gitconfig" "${HOME}/.gitconfig" \
-    --ro-bind-try "${HOME}/.ssh" "${HOME}/.ssh" \
+    --ro-bind-try "${HOME}/.ssh/config" "${HOME}/.ssh/config" \
+    --ro-bind-try "${HOME}/.ssh/known_hosts" "${HOME}/.ssh/known_hosts" \
     --ro-bind-try /etc/alternatives /etc/alternatives \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
     --ro-bind /etc/ssl /etc/ssl \
