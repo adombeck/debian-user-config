@@ -74,6 +74,33 @@ fi
 mkdir -p "$CLAUDE_CONFIG_DIR"
 touch "$CLAUDE_JSON"
 
+# Sign commits without interaction using a TPM-bound key served by
+# ssh-tpm-agent. Only the agent socket and the public key are exposed; the
+# private key never leaves the TPM. The signing config is passed via
+# GIT_CONFIG_* env vars so the user's own commits keep their normal signing
+# setup. Skipped entirely unless both the socket and the public key exist.
+TPM_AGENT_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-tpm-agent.sock"
+TPM_SIGNING_PUB="${HOME}/.ssh/id_ecdsa_claude_signing.pub"
+TPM_ALLOWED_SIGNERS="${HOME}/.config/git/allowed_signers"
+SIGNING_ARGS=()
+if [[ -S "$TPM_AGENT_SOCK" && -f "$TPM_SIGNING_PUB" ]]; then
+    SIGNING_ARGS=(
+        --bind "$TPM_AGENT_SOCK" "$TPM_AGENT_SOCK"
+        --setenv SSH_AUTH_SOCK "$TPM_AGENT_SOCK"
+        --setenv GIT_CONFIG_COUNT 4
+        --setenv GIT_CONFIG_KEY_0 gpg.format
+        --setenv GIT_CONFIG_VALUE_0 ssh
+        --setenv GIT_CONFIG_KEY_1 user.signingkey
+        --setenv GIT_CONFIG_VALUE_1 "$TPM_SIGNING_PUB"
+        --setenv GIT_CONFIG_KEY_2 commit.gpgsign
+        --setenv GIT_CONFIG_VALUE_2 true
+        --setenv GIT_CONFIG_KEY_3 gpg.ssh.allowedSignersFile
+        --setenv GIT_CONFIG_VALUE_3 "$TPM_ALLOWED_SIGNERS"
+    )
+    [[ -f "$TPM_ALLOWED_SIGNERS" ]] &&
+        SIGNING_ARGS+=(--ro-bind "$TPM_ALLOWED_SIGNERS" "$TPM_ALLOWED_SIGNERS")
+fi
+
 exec bwrap \
     --unshare-all \
     --share-net \
@@ -106,6 +133,7 @@ exec bwrap \
     "${EXTRA_BIND_ARGS[@]}" \
     --bind "$CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" \
     --bind "$CLAUDE_JSON" "$CLAUDE_JSON" \
+    "${SIGNING_ARGS[@]}" \
     \
     --setenv HOME "$HOME" \
     --setenv CLAUDE_CONFIG_DIR "$CLAUDE_CONFIG_DIR" \
