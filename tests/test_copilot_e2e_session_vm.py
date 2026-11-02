@@ -18,12 +18,127 @@ from unittest.mock import patch
 from scripts.e2e.copilot_e2e_session_vm import (
     copy_shared_source_markers,
     create_overlay,
+    ensure_initial_baseline,
     isolate_domain,
     parse_args,
+    provision_initial_baseline,
     snapshot_disk_path,
     validate_paths,
     virsh_proxy,
 )
+
+
+class InitialBaselineTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.args = SimpleNamespace(
+            base_vm_name="e2e-runner-resolute",
+            vm_name="e2e-runner-resolute-copilot-1234abcd",
+            vm_alias="e2e-runner-resolute",
+            shared_data_dir=str(self.root),
+            session_data_dir=str(self.root),
+            release="resolute",
+        )
+        self.prefix = "scripts.e2e.copilot_e2e_session_vm."
+        self.ensure = patch(self.prefix + "ensure_base_domain").start()
+        self.exists = patch(self.prefix + "virsh_domain_exists", return_value=False).start()
+        self.snapshots = patch(self.prefix + "session_snapshot_names_or_error", return_value=set()).start()
+        self.disk = patch(self.prefix + "session_vda_path", return_value=str(self.root / "missing.qcow2")).start()
+        self.state = patch(self.prefix + "domain_state", return_value="shut off").start()
+        self.provision = patch(self.prefix + "provision_initial_baseline").start()
+        self.addCleanup(patch.stopall)
+
+    def test_existing_shared_baseline_is_reused(self):
+        self.snapshots.side_effect = [set(), {"initial-setup", "authd-installed"}]
+        ensure_initial_baseline(self.args)
+        self.provision.assert_not_called()
+
+    def test_existing_private_baseline_is_reused(self):
+        self.snapshots.return_value = {"initial-setup"}
+        ensure_initial_baseline(self.args)
+        self.ensure.assert_not_called()
+        self.provision.assert_not_called()
+
+    def test_missing_domain_is_provisioned_automatically(self):
+        self.exists.return_value = False
+        ensure_initial_baseline(self.args)
+        self.provision.assert_called_once_with(self.args)
+
+    def test_stale_definition_with_missing_disk_is_rebuilt(self):
+        ensure_initial_baseline(self.args)
+        self.provision.assert_called_once_with(self.args)
+
+    def test_existing_unmarked_disk_is_not_replaced(self):
+        self.exists.return_value = True
+        image = self.root / "existing.qcow2"
+        image.touch()
+        self.disk.return_value = str(image)
+        with self.assertRaisesRegex(RuntimeError, "refusing to replace"):
+            ensure_initial_baseline(self.args)
+        self.provision.assert_not_called()
+
+    def test_active_baseline_is_not_replaced(self):
+        self.exists.return_value = True
+        self.state.return_value = "running"
+        with self.assertRaisesRegex(RuntimeError, "still running"):
+            ensure_initial_baseline(self.args)
+        self.provision.assert_not_called()
+
+    def test_shared_vm_with_other_snapshots_is_left_unchanged(self):
+        self.snapshots.side_effect = [set(), {"authd-installed"}]
+        ensure_initial_baseline(self.args)
+        self.provision.assert_called_once_with(self.args)
+
+    def test_provisioning_failure_is_reported(self):
+        self.provision.side_effect = RuntimeError("cloud-init failed")
+        with self.assertRaisesRegex(RuntimeError, "cloud-init failed"):
+            ensure_initial_baseline(self.args)
+
+    def test_completed_cloud_init_is_required_before_creating_snapshot(self):
+        vm_dir = self.root / "e2e-tests" / "vm"
+        vm_dir.mkdir(parents=True)
+        (vm_dir / "cloud-init-scripts").mkdir()
+        (vm_dir / "cloud-init-template-resolute.yaml").write_text(
+            "#cloud-config\nkey: ${SSH_PUBLIC_KEY}\njournal: ${SOCAT_ADDRESS}\n"
+        )
+        xml = (
+            "<domain><name>base</name><devices>"
+            "<disk><source file='${IMAGE_FILE}'/><target dev='vda'/></disk>"
+            "</devices></domain>"
+        )
+        (vm_dir / "e2e-runner-template.xml").write_text(xml)
+        key = self.root / "test.pub"
+        key.write_text("ssh-ed25519 test\n")
+        cache = self.root / "cache" / "authd-e2e-tests"
+        cache.mkdir(parents=True)
+        (cache / "resolute-server-cloudimg-amd64.img").touch()
+        self.args.session_id = "1234abcd"
+        self.args.socket_dir = "/tmp/e2e/libvirt"
+        commands = []
+
+        def run_command(command, **kwargs):
+            commands.append(command)
+            output = ""
+            if command[:2] == ["git", "rev-parse"]:
+                output = str(self.root)
+            elif command[:2] == ["systemctl", "--version"]:
+                output = "systemd 258\n"
+            elif command[0] == "/usr/bin/env":
+                output = json.dumps({"v1": {"errors": ["package install failed"]}})
+            return CompletedProcess(command, 0, output, "")
+
+        with patch.dict(os.environ, {
+            "SSH_PUBLIC_KEY_FILE": str(key), "XDG_CACHE_HOME": str(self.root / "cache"),
+        }), patch(
+            self.prefix + "run", side_effect=run_command,
+        ), patch(self.prefix + "virsh"), patch(
+            self.prefix + "domain_state", return_value="shut off",
+        ), self.assertRaisesRegex(RuntimeError, "package install failed"):
+            provision_initial_baseline(self.args)
+        self.assertFalse(any("force_create_snapshot" in argument for command in commands for argument in command))
+        self.assertTrue((self.root / "resolute" / "e2e-runner-resolute.bootstrap").exists())
 
 
 class SessionVMDiskTests(unittest.TestCase):
@@ -265,11 +380,24 @@ class SessionVMVirshHookTests(unittest.TestCase):
         with patch(
             "scripts.e2e.copilot_e2e_session_vm.virsh",
             side_effect=lambda *args, **kwargs: next(outputs),
+        ), patch(
+            "scripts.e2e.copilot_e2e_session_vm.virsh_domain_exists", return_value=True,
         ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
             status = virsh_proxy(["snapshot-list", "e2e-runner-noble", "--name"])
 
         self.assertEqual(status, 0)
         self.assertEqual(stdout.getvalue(), "authd-installed\ninitial-setup\n")
+
+    def test_snapshot_list_works_without_a_shared_domain(self):
+        with patch(
+            "scripts.e2e.copilot_e2e_session_vm.session_snapshot_names_or_error",
+            return_value={"initial-setup"},
+        ), patch(
+            "scripts.e2e.copilot_e2e_session_vm.virsh_domain_exists", return_value=False,
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            status = virsh_proxy(["snapshot-list", "e2e-runner-noble", "--name"])
+        self.assertEqual(status, 0)
+        self.assertEqual(stdout.getvalue(), "initial-setup\n")
 
     def test_shared_snapshot_revert_uses_private_overlay(self):
         outputs = iter(

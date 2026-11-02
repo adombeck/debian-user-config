@@ -3,6 +3,8 @@
 """Per-session VM snapshots for the shared Copilot E2E libvirt service."""
 
 import argparse
+import fcntl
+import ipaddress
 import json
 import os
 import re
@@ -14,6 +16,7 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from string import Template
 
 VIRSH_BIN = "/usr/bin/virsh"
 
@@ -99,7 +102,7 @@ def virsh_domain_exists(vm_name):
     return virsh("dominfo", vm_name, check=False).returncode == 0
 
 
-def ensure_base_domain(base_vm_name, shared_data_dir, release):
+def ensure_base_domain(base_vm_name, shared_data_dir, release, *, missing_ok=False):
     if virsh_domain_exists(base_vm_name):
         return
 
@@ -122,9 +125,173 @@ def ensure_base_domain(base_vm_name, shared_data_dir, release):
         virsh("define", str(candidate))
         return
 
+    if missing_ok:
+        return
     raise RuntimeError(
         f"shared E2E base VM {base_vm_name} is not defined and its domain XML was not found"
     )
+
+
+def ensure_initial_baseline(args):
+    # Shared baselines are read-only in the sandbox. Build missing ones privately.
+    root = Path(args.session_data_dir)
+    lock_path = root / f".{args.base_vm_name}.baseline.lock"
+    with os.fdopen(os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if "initial-setup" in session_snapshot_names_or_error(args.vm_name):
+            return
+        ensure_base_domain(args.base_vm_name, args.shared_data_dir, args.release, missing_ok=True)
+        if "initial-setup" in session_snapshot_names_or_error(args.base_vm_name):
+            return
+        if virsh_domain_exists(args.vm_name):
+            if domain_state(args.vm_name) != "shut off":
+                raise RuntimeError("unfinished session baseline is still running; refusing to replace it")
+            disk = session_vda_path(args.vm_name)
+            expected = root / args.release / f"{args.vm_alias}.qcow2"
+            if disk != str(expected) or not expected.with_suffix(".bootstrap").is_file():
+                raise RuntimeError("session VM has an existing disk but no initial-setup; refusing to replace it")
+        provision_initial_baseline(args)
+
+
+def provision_initial_baseline(args):
+    repo = Path(run(["git", "rev-parse", "--show-toplevel"]).stdout.strip())
+    vm_dir = repo / "e2e-tests" / "vm"
+    release = args.release
+    if release == "devel":
+        release = run([
+            "bash", "-c", 'source "$1/lib/libprovision.sh"; resolve_devel_release devel',
+            "bash", str(vm_dir),
+        ]).stdout.strip()
+    template = vm_dir / f"cloud-init-template-{release}.yaml"
+    if not template.is_file() or not (vm_dir / "e2e-runner-template.xml").is_file():
+        raise RuntimeError("run baseline provisioning from an authd worktree with the release's cloud-init template")
+    key_path = os.environ.get("SSH_PUBLIC_KEY_FILE")
+    if not key_path or not Path(key_path).is_file():
+        raise RuntimeError("SSH_PUBLIC_KEY_FILE is required to provision the initial E2E baseline")
+    public_key = Path(key_path).read_text().strip()
+    dns = os.environ.get("AUTHD_E2E_DNS_SERVER")
+    if dns:
+        ipaddress.ip_address(dns)
+
+    artifacts = Path(args.session_data_dir) / args.release
+    if artifacts.is_symlink():
+        raise RuntimeError("refusing to use symlinked session baseline artifacts")
+    artifacts.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not inside(artifacts, args.session_data_dir):
+        raise RuntimeError("baseline artifacts are outside session E2E storage")
+    image = artifacts / f"{args.vm_alias}.qcow2"
+    marker = image.with_suffix(".bootstrap")
+    if image.is_symlink() or marker.is_symlink():
+        raise RuntimeError("refusing to use symlinked baseline disk or bootstrap marker")
+    if image.exists() and not marker.is_file():
+        raise RuntimeError(f"refusing to overwrite an unmarked baseline disk: {image}")
+
+    print(f"Provisioning missing {args.release} initial-setup baseline in private session storage; this can take several minutes", flush=True)
+    if not image.exists():
+        cache = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "authd-e2e-tests"
+        cache.mkdir(parents=True, exist_ok=True)
+        source = cache / f"{release}-server-cloudimg-amd64.img"
+        if not source.is_file():
+            fd, temporary = tempfile.mkstemp(prefix=f".{source.name}.", dir=cache)
+            os.close(fd)
+            try:
+                run([
+                    "curl", "--fail", "--location", "--retry", "3", "--output", temporary,
+                    f"https://cloud-images.ubuntu.com/{release}/current/{source.name}",
+                ])
+                os.replace(temporary, source)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        atomic_write_bytes(marker, b"Cloud-init baseline provisioning in progress\n")
+        run(["cp", "--reflink=auto", str(source), str(image)])
+        run(["qemu-img", "resize", str(image), "10G"])
+
+    systemd_version = int(run(["systemctl", "--version"]).stdout.split()[1])
+    journal_address = "TCP-LISTEN:55000,bind=0.0.0.0,reuseaddr"
+    if systemd_version >= 256 and not os.environ.get("FORCE_JOURNAL_TCP"):
+        journal_address = "VSOCK-CONNECT:2:55000"
+    cloud_config = Template(template.read_text()).safe_substitute(
+        SSH_PUBLIC_KEY=public_key,
+        CI_ROOT_SSHD_CONFIG="",
+        CI_ROOT_PASSWD_CMD="",
+        SOCAT_ADDRESS=journal_address,
+    )
+    atomic_write_bytes(artifacts / "cloud-config.yaml", cloud_config.encode())
+    disable_cloud_init = artifacts / "99-disable-cloud-init.sh"
+    atomic_write_bytes(disable_cloud_init, b"#!/bin/sh\nset -eu\ntouch /etc/cloud/cloud-init.disabled\n")
+    user_data = artifacts / "user-data"
+    run([
+        "write-mime-multipart", "--output", str(user_data),
+        f"{artifacts / 'cloud-config.yaml'}:text/cloud-config",
+        *[f"{path}:text/x-shellscript" for path in sorted((vm_dir / "cloud-init-scripts").glob("*"))],
+        f"{disable_cloud_init}:text/x-shellscript",
+    ])
+    seed = artifacts / "seed.iso"
+    if not seed.exists():
+        network_args = []
+        if dns:
+            network = {
+                "version": 2,
+                "ethernets": {"e2e": {
+                    "match": {"name": "en*"}, "dhcp4": True,
+                    "dhcp4-overrides": {"use-dns": False},
+                    "nameservers": {"addresses": [dns]},
+                }},
+            }
+            network_file = artifacts / "network-config"
+            atomic_write_bytes(network_file, json.dumps(network).encode())
+            network_args = ["--network-config", str(network_file)]
+        run(["cloud-localds", *network_args, str(seed), str(user_data)])
+    domain = ET.fromstring(Template((vm_dir / "e2e-runner-template.xml").read_text()).substitute(
+        VM_NAME=args.vm_name, IMAGE_FILE=str(image),
+    ))
+    isolate_domain(domain, argparse.Namespace(
+        vm_name=args.vm_name, session_id=args.session_id, socket_dir=args.socket_dir,
+    ), image)
+    disk = ET.SubElement(domain.find("devices"), "disk", type="file", device="disk")
+    ET.SubElement(disk, "driver", name="qemu", type="raw")
+    ET.SubElement(disk, "source", file=str(seed))
+    ET.SubElement(disk, "target", dev="vdb", bus="virtio")
+    ET.SubElement(disk, "readonly")
+    xml_path = artifacts / f"{args.vm_alias.removesuffix(f'-{args.release}')}.xml"
+    atomic_write_xml(xml_path, domain)
+    virsh("define", str(xml_path))
+    if marker.read_text() != "cloud-init complete\n":
+        virsh("start", args.vm_name)
+        deadline = time.monotonic() + 1800
+        while domain_state(args.vm_name) != "shut off":
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"cloud-init did not finish in 30 minutes; inspect {args.vm_name}")
+            time.sleep(3)
+        atomic_write_bytes(marker, b"cloud-init complete\n")
+    virsh("detach-disk", args.vm_name, "vdb", "--config")
+    environment = [
+        "/usr/bin/env", "-u", "AUTHD_E2E_HOOKS_DIR", "-u", "AUTHD_E2E_SESSION_ID",
+        f"VM_NAME={args.vm_name}", f"RELEASE={args.release}",
+        f"PATH={Path(shutil.which('sudo') or '/usr/bin/sudo').parent}:/usr/bin:/bin",
+    ]
+    result = json.loads(run([
+        *environment, "bash", "-c",
+        (
+            'source "$1/lib/libprovision.sh"; SSH="$1/ssh.sh"; ARTIFACTS_DIR="$2"; '
+            'boot_system >&2 && "$SSH" -- "cat /var/lib/cloud/data/result.json"'
+        ),
+        "bash", str(vm_dir), str(artifacts),
+    ]).stdout)
+    if result.get("v1", {}).get("errors") != []:
+        raise RuntimeError(f"baseline cloud-init failed: {result}")
+    run([
+        *environment, "bash", "-c",
+        (
+            'source "$1/lib/libprovision.sh"; SSH="$1/ssh.sh"; IMAGE="$2"; ARTIFACTS_DIR="$3"; '
+            'force_create_snapshot initial-setup && shutdown_system'
+        ),
+        "bash", str(vm_dir), str(image), str(artifacts),
+    ])
+    atomic_write_xml(xml_path, ET.fromstring(virsh("dumpxml", args.vm_name, "--inactive").stdout))
+    marker.unlink()
+    print(f"Created {args.release} initial-setup baseline", flush=True)
 
 
 def shared_snapshot_xml(base_vm_name, snapshot_name):
@@ -451,6 +618,11 @@ def prepare_session_domain(args, snapshot):
 
 def prepare(args):
     validate_paths(args)
+    if args.snapshot == "initial-setup":
+        ensure_initial_baseline(args)
+        if "initial-setup" in session_snapshot_names_or_error(args.vm_name):
+            print(f"prepared private initial-setup baseline on {args.vm_name}")
+            return
     ensure_base_domain(args.base_vm_name, args.shared_data_dir, args.release)
     copy_shared_source_markers(args)
     snapshot = shared_snapshot_xml(args.base_vm_name, args.snapshot)
@@ -463,6 +635,8 @@ def restore(args):
     if args.force:
         reset_session_vm(args)
 
+    if args.snapshot == "initial-setup":
+        ensure_initial_baseline(args)
     if virsh_domain_exists(args.vm_name):
         if args.snapshot in session_snapshot_names(args.vm_name):
             virsh("snapshot-revert", args.vm_name, args.snapshot)
@@ -655,7 +829,11 @@ def virsh_proxy(arguments):
         if "--name" not in command_arguments:
             return virsh_output(mapped_arguments)
         local_names = session_snapshot_names_or_error(session_vm_name)
-        shared_names = virsh("snapshot-list", vm_alias, "--name", check=False)
+        shared_names = (
+            virsh("snapshot-list", vm_alias, "--name", check=False)
+            if virsh_domain_exists(vm_alias)
+            else subprocess.CompletedProcess([], 0, "", "")
+        )
         if shared_names.returncode != 0:
             sys.stderr.write(shared_names.stderr)
             return shared_names.returncode
