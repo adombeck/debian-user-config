@@ -18,8 +18,10 @@ from unittest.mock import patch
 from scripts.e2e.copilot_e2e_session_vm import (
     copy_shared_source_markers,
     create_overlay,
+    isolate_domain,
     parse_args,
     snapshot_disk_path,
+    validate_paths,
     virsh_proxy,
 )
 
@@ -83,14 +85,99 @@ class SessionVMDiskTests(unittest.TestCase):
         )
         snapshot = ET.fromstring(
             "<domainsnapshot><disks><disk name='vda' snapshot='external' type='file'>"
-            f"<source file='{external_disk}'/></disk></disks></domainsnapshot>"
+            f"<source file='{external_disk}'/></disk></disks>"
+            f"<domain><devices><disk><source file='{external_disk}'/>"
+            "<target dev='vda'/></disk></devices></domain></domainsnapshot>"
         )
 
         with self.assertRaisesRegex(RuntimeError, "outside shared E2E storage"):
             snapshot_disk_path(snapshot, self.shared_directory)
 
+    def test_snapshot_uses_frozen_disk_not_new_writable_overlay(self):
+        active_disk = self.shared_directory / "active.qcow2"
+        create_overlay(self.snapshot_disk, "qcow2", active_disk)
+        subprocess.run(
+            ["qemu-io", "-c", "write -P 0xa5 1M 512", str(active_disk)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        snapshot = ET.fromstring(
+            "<domainsnapshot><disks><disk name='vda' snapshot='external'>"
+            f"<source file='{active_disk}'/></disk></disks>"
+            f"<domain><devices><disk><source file='{self.snapshot_disk}'/>"
+            "<target dev='vda'/></disk></devices></domain></domainsnapshot>"
+        )
+        frozen_disk, disk_format = snapshot_disk_path(snapshot, self.shared_directory)
+        self.assertEqual(frozen_disk, str(self.snapshot_disk))
+        overlay = self.root / "restored.qcow2"
+        create_overlay(frozen_disk, disk_format, overlay)
+        subprocess.run(
+            ["qemu-io", "-c", "read -P 0x00 1M 512", str(overlay)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+    def test_snapshot_without_saved_domain_is_rejected(self):
+        snapshot = ET.fromstring(
+            "<domainsnapshot><disks><disk name='vda' snapshot='external'>"
+            f"<source file='{self.snapshot_disk}'/></disk></disks></domainsnapshot>"
+        )
+        with self.assertRaisesRegex(RuntimeError, "frozen disk image"):
+            snapshot_disk_path(snapshot, self.shared_directory)
+
 
 class SessionVMConfigurationTests(unittest.TestCase):
+    def test_selected_data_directory_must_match_assigned_session(self):
+        args = SimpleNamespace(
+            shared_data_dir="/tmp/shared",
+            session_data_dir="/tmp/shared/sessions/1234abcd",
+            session_id="1234abcd",
+        )
+        with patch.dict(os.environ, {"AUTHD_E2E_DATA_DIR": "/tmp/elsewhere"}):
+            with self.assertRaisesRegex(RuntimeError, "assigned session storage"):
+                validate_paths(args)
+
+    def test_session_domain_uses_rootless_network_and_external_confinement(self):
+        domain = ET.fromstring(
+            "<domain><name>e2e-runner-noble</name><devices>"
+            "<disk><source file='/shared/base'/><target dev='vda'/></disk>"
+            "<interface type='network'><source network='default'/>"
+            "<model type='virtio'/></interface>"
+            "<vsock><cid auto='yes' address='5'/></vsock>"
+            "</devices><seclabel type='none' model='apparmor'/></domain>"
+        )
+        args = SimpleNamespace(
+            vm_name="e2e-runner-noble-copilot-1234abcd",
+            session_id="1234abcd",
+            socket_dir="/run/user/1000/copilot-e2e/libvirt",
+        )
+        isolate_domain(domain, args, "/session/private.qcow2")
+        self.assertEqual(domain.findtext("name"), args.vm_name)
+        interface = domain.find("./devices/interface")
+        self.assertEqual(interface.get("type"), "user")
+        self.assertIsNone(interface.find("source"))
+        self.assertEqual(interface.find("model").get("type"), "virtio")
+        self.assertIsNone(domain.find("seclabel"))
+        self.assertEqual(
+            domain.find("./devices/disk/source").get("file"), "/session/private.qcow2"
+        )
+        self.assertIsNone(domain.find("./devices/vsock/cid").get("address"))
+
+    def test_session_domain_rejects_unknown_managed_network(self):
+        domain = ET.fromstring(
+            "<domain><name>base</name><devices>"
+            "<disk><source file='/shared/base'/><target dev='vda'/></disk>"
+            "<interface type='network'><source network='special'/></interface>"
+            "</devices></domain>"
+        )
+        args = SimpleNamespace(
+            vm_name="base-copilot-1234abcd",
+            session_id="1234abcd",
+            socket_dir="/run/user/1000/copilot-e2e/libvirt",
+        )
+        with self.assertRaisesRegex(RuntimeError, "only the default managed network"):
+            isolate_domain(domain, args, "/session/private.qcow2")
+
     def test_session_configuration_comes_from_wrapper_environment(self):
         environment = {
             "VM_NAME": "e2e-runner-noble",

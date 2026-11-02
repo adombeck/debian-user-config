@@ -15,7 +15,6 @@ import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-
 VIRSH_BIN = "/usr/bin/virsh"
 
 
@@ -60,6 +59,9 @@ def validate_paths(args):
     session_dir = Path(args.session_data_dir)
     expected_session_dir = shared_dir / "sessions" / args.session_id
 
+    selected_data_dir = os.environ.get("AUTHD_E2E_DATA_DIR")
+    if selected_data_dir and os.path.realpath(selected_data_dir) != os.path.realpath(session_dir):
+        raise RuntimeError("selected E2E data directory does not match assigned session storage")
     if not shared_dir.is_dir() or shared_dir.is_symlink():
         raise RuntimeError(f"shared E2E data directory is invalid: {shared_dir}")
     if session_dir.is_symlink() or not session_dir.is_dir():
@@ -145,10 +147,22 @@ def snapshot_disk_path(snapshot, shared_dir):
             "shared E2E snapshots must use external vda disks to support isolated VM overlays"
         )
 
-    source = disk.find("source")
+    # <disks> names the new writable overlay. The saved domain names the
+    # frozen disk whose contents belong to the snapshot.
+    saved_disks = snapshot.findall("./domain/devices/disk")
+    saved_disk = next(
+        (
+            item
+            for item in saved_disks
+            if item.find("target") is not None
+            and item.find("target").get("dev") == "vda"
+        ),
+        None,
+    )
+    source = saved_disk.find("source") if saved_disk is not None else None
     path = source.get("file") if source is not None else None
     if not path:
-        raise RuntimeError("shared snapshot vda does not reference a disk image")
+        raise RuntimeError("shared snapshot domain vda does not reference a frozen disk image")
     if not inside(path, shared_dir):
         raise RuntimeError(f"shared snapshot disk is outside shared E2E storage: {path}")
     if os.path.islink(path) or not os.path.isfile(path):
@@ -283,20 +297,24 @@ def isolate_domain(domain, args, disk_path):
     session_agent_socket(domain, args.socket_dir, args.vm_name)
 
     for interface in domain.findall("./devices/interface"):
-        if interface.get("type") == "user":
-            continue
-        mac = interface.find("mac")
-        if mac is None:
-            continue
-        suffix = uuid.uuid4().int & 0xFFFFFF
-        mac.set(
-            "address",
-            f"52:54:00:{(suffix >> 16) & 0xff:02x}:{(suffix >> 8) & 0xff:02x}:{suffix & 0xff:02x}",
-        )
+        if interface.get("type") == "network":
+            source = interface.find("source")
+            if source is None or source.get("network") != "default":
+                raise RuntimeError("only the default managed network can be replaced for a session VM")
+            interface.set("type", "user")
+            interface.remove(source)
+        if interface.get("type") != "user":
+            raise RuntimeError("session VMs require user-mode networking")
 
     for cid in domain.findall("./devices/vsock/cid"):
         if cid.get("auto") == "yes":
             cid.attrib.pop("address", None)
+
+    # QEMU inherits the service's scoped AppArmor profile. The rootless daemon
+    # deliberately does not load a separate per-domain security driver.
+    for label in domain.findall("seclabel"):
+        if label.get("model") == "apparmor":
+            domain.remove(label)
 
 
 def atomic_write_xml(path, element):
