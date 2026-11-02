@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,22 +24,20 @@ AUTHD_E2E_TEST_HTML_REGEX = re.compile(
     rf'{re.escape(str(Path.home() / ".local/share/authd-e2e-artifacts"))})/.*\.html')
 GITHUB_RUN_ID_REGEX = re.compile(r'run-\d+')
 GITHUB_RUN_URL = "https://github.com/canonical/authd/actions/runs/"
-GITHUB_AUTHD_CI_JOB_URL_REGEX = re.compile(
-    r'https://github\.com/canonical/authd/actions/runs/\d+/job/\d+(?:\?.*)?')
+GITHUB_CI_JOB_URL_REGEX = re.compile(
+    r'https://github\.com/[^/]+/[^/]+/actions/runs/\d+/job/\d+/?(?:\?[^#]*)?')
 AUTHD_E2E_TEST_LOG_URL_REGEX = re.compile(
     r'https://authd-e2e-test-logs\.adrian-dombeck\.workers\.dev/'
     r'(?:pr-\d+/run-\d+-\d+|[a-z][a-z0-9_-]*-(?P<event_run_id>\d+)/'
     r'run-(?P=event_run_id)-\d+)/[^/?#]+/log\.html(?:#s\d+-s\d+)?')
-GITHUB_CANONICAL_ISSUE_REGEX = re.compile(r'https://github\.com/canonical/[^/]+/issues/\d+')
+GITHUB_ISSUE_REGEX = re.compile(
+    r'https://github\.com/[^/]+/[^/]+/issues/\d+/?(?:\?[^#]*)?')
 JIRA_ISSUE_URL_REGEX = re.compile(r'https://[^/]*atlassian\.net/browse/[A-Z]+-\d+')
 JIRA_CLAIM_ISSUE_SCRIPT = Path("~/projects/authd-scripts/jira-claim-issue").expanduser()
-FIX_ISSUE_SCRIPT = Path("~/projects/authd-scripts/fix-issue").expanduser()
-DEBUG_CI_JOB_SCRIPT = Path("~/projects/authd-scripts/debug-ci-job").expanduser()
 DEBUG_CI_E2E_TEST_SCRIPT = Path("~/projects/authd-scripts/debug-ci-e2e-test").expanduser()
 GITHUB_REVIEW_COMMENT_URL_REGEX = re.compile(
-    r'https://github\.com/[^/]+/[^/]+/pull/\d+#'
+    r'https://github\.com/[^/]+/[^/]+/pull/\d+/?(?:\?[^#]*)?#'
     r'(discussion_r\d+|issuecomment-\d+|pullrequestreview-\d+)')
-ADDRESS_REVIEW_COMMENT_SCRIPT = Path("~/projects/authd-scripts/address-review-comment").expanduser()
 
 AUTHD_REPO = Path("~/projects/authd").expanduser()
 GUAKE_DBUS_DEST = "org.guake3.RemoteControl"
@@ -48,7 +47,144 @@ GUAKE_DBUS_IFACE = "org.guake3.RemoteControl"
 # Add $HOME/.local/bin to the PATH
 os.environ['PATH'] = f"{os.environ['PATH']}:{Path.home()}/.local/bin"
 
+# Temporary until the desktop session picks up environment.d after login.
+os.environ.setdefault(
+    "DESKTOP_ENGINEERING_DIR",
+    str(Path.home() / "projects/desktop-engineering-shared-developer-tools"),
+)
+
 ALT = len(sys.argv) > 1 and sys.argv[1] == "--alt"
+
+
+def desktop_tool(name):
+    directory = os.environ.get("DESKTOP_ENGINEERING_DIR")
+    if directory:
+        tool = Path(directory).expanduser() / "bin" / name
+        if tool.is_file() and os.access(tool, os.X_OK):
+            return str(tool)
+    tool = shutil.which(name)
+    if tool:
+        return tool
+    raise FileNotFoundError(
+        f"Cannot find {name}. Add desktop-engineering/bin to PATH or set "
+        "DESKTOP_ENGINEERING_DIR to a checkout containing the shared developer tools."
+    )
+
+
+def current_project():
+    project_file = Path.home() / ".cache/current-intellij-project"
+    if project_file.is_file():
+        project = Path(project_file.read_text().strip()).expanduser()
+        if (project / ".git").exists():
+            return project
+    return None
+
+
+def github_repository_dir(url):
+    owner, name = url.split("/")[3:5]
+    projects = Path.home() / "projects"
+    named_checkout = projects / name
+    candidates = [current_project(), named_checkout]
+    if projects.is_dir():
+        candidates.extend(sorted(projects.iterdir()))
+    remote_pattern = re.compile(
+        rf"(?:https?://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+        rf"{re.escape(owner + '/' + name)}(?:\.git)?/?\s",
+        re.IGNORECASE,
+    )
+    seen = set()
+    for candidate in candidates:
+        if candidate is None or candidate in seen or not (candidate / ".git").exists():
+            continue
+        seen.add(candidate)
+        remotes = subprocess.run(
+            ["git", "--no-pager", "remote", "-v"],
+            cwd=candidate, capture_output=True, text=True,
+        )
+        if remotes.returncode == 0 and remote_pattern.search(remotes.stdout):
+            return candidate
+    # The shared tool also validates fork-only checkouts against GitHub metadata.
+    if (named_checkout / ".git").exists():
+        return named_checkout
+    raise ValueError(f"No local checkout found for {owner}/{name} in {projects}.")
+
+
+def run_github_workflow(tool, url, title, failure_title):
+    try:
+        command = [
+            desktop_tool(tool), "--repo-dir", str(github_repository_dir(url)),
+            "--terminal", "guake", "--intellij", url,
+        ]
+    except (OSError, ValueError) as error:
+        notify(failure_title, str(error))
+        return 1
+    return run_command_with_error_notification(command, title, url, failure_title)
+
+
+def open_branch_worktree(clipboard_content):
+    repo = current_project() or AUTHD_REPO
+    if not repo.exists():
+        return False
+    result = subprocess.run(
+        ["git", "--no-pager", "for-each-ref", "--format=%(refname:short)",
+         f"refs/heads/{clipboard_content}", f"refs/remotes/*/{clipboard_content}"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    branch = clipboard_content
+    remote = None
+    if result.returncode != 0 or not result.stdout.strip():
+        if clipboard_content.count(":") != 1:
+            return False
+        remote, branch = clipboard_content.split(":", 1)
+        remotes = subprocess.run(
+            ["git", "--no-pager", "remote"], cwd=repo, capture_output=True, text=True,
+        )
+        if remotes.returncode != 0 or remote not in remotes.stdout.splitlines():
+            return False
+
+    try:
+        command = [desktop_tool("de-worktree"), "-C", str(repo), "--intellij"]
+    except OSError as error:
+        notify("Failed to set up worktree", str(error))
+        return True
+    if remote:
+        if run_command_with_error_notification(
+            ["git", "--no-pager", "fetch", "--no-recurse-submodules", remote, branch],
+            "Fetching branch", clipboard_content, "Failed to fetch branch", cwd=repo,
+        ) != 0:
+            return True
+    notify("Setting up worktree", f"Repository: {repo}\nBranch: {branch}")
+    try:
+        result = subprocess.run(
+            [*command, branch], cwd=repo, capture_output=True, text=True,
+        )
+    except OSError as error:
+        notify("Failed to set up worktree", str(error))
+        return True
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    if result.returncode != 0:
+        notify("Failed to set up worktree", result.stderr.strip() or result.stdout.strip())
+        return True
+    worktree_path = Path(result.stdout.strip())
+    if not result.stdout.strip() or not worktree_path.is_dir():
+        notify("Failed to set up worktree", f"Invalid worktree path: {result.stdout.strip()}")
+        return True
+    if ALT:
+        subprocess.Popen(["idea", str(worktree_path)])
+    else:
+        for method, arguments in (
+            ("add_tab", [str(worktree_path)]),
+            ("show", []),
+        ):
+            subprocess.run(
+                ["gdbus", "call", "--session", "--dest", GUAKE_DBUS_DEST,
+                 "--object-path", GUAKE_DBUS_OBJECT,
+                 "--method", f"{GUAKE_DBUS_IFACE}.{method}", *arguments],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+    return True
+
 
 class Editor:
     def open(self, path, line_number=None):
@@ -341,30 +477,29 @@ def main():
             subprocess.run(["xdg-open", url])
         return
 
-    # If the clipboard content is an authd GitHub Actions job URL, create a
+    # If the clipboard content is a GitHub Actions job URL, create a
     # worktree for its PR and start a Copilot session to debug the failure.
-    if GITHUB_AUTHD_CI_JOB_URL_REGEX.fullmatch(clipboard_content) and DEBUG_CI_JOB_SCRIPT.exists():
-        run_command_with_error_notification(
-            [str(DEBUG_CI_JOB_SCRIPT), clipboard_content],
-            "Debugging authd CI job",
+    if GITHUB_CI_JOB_URL_REGEX.fullmatch(clipboard_content):
+        run_github_workflow(
+            "de-debug-ci-job",
             clipboard_content,
-            "Failed to debug authd CI job",
+            "Debugging CI job",
+            "Failed to debug CI job",
         )
         return
 
-    # If the clipboard content is a GitHub issue URL for a canonical repo,
+    # If the clipboard content is a GitHub issue URL,
     # prepare its worktree, then claim Jira in the background.
-    if GITHUB_CANONICAL_ISSUE_REGEX.match(clipboard_content) and JIRA_CLAIM_ISSUE_SCRIPT.exists():
-        if not FIX_ISSUE_SCRIPT.exists():
-            notify("Failed to prepare authd worktree", str(FIX_ISSUE_SCRIPT))
+    if GITHUB_ISSUE_REGEX.fullmatch(clipboard_content):
+        if run_github_workflow(
+            "de-fix-issue",
+            clipboard_content,
+            "Preparing worktree",
+            "Failed to prepare worktree",
+        ) != 0:
             return
 
-        if run_command_with_error_notification(
-            [str(FIX_ISSUE_SCRIPT), clipboard_content],
-            "Preparing authd worktree",
-            clipboard_content,
-            "Failed to prepare authd worktree",
-        ) != 0:
+        if not clipboard_content.startswith("https://github.com/canonical/") or not JIRA_CLAIM_ISSUE_SCRIPT.exists():
             return
 
         try:
@@ -382,11 +517,11 @@ def main():
 
     # If the clipboard content is a URL to GitHub PR review feedback or a
     # PR issue comment, call address-review-comment
-    if GITHUB_REVIEW_COMMENT_URL_REGEX.match(clipboard_content) and ADDRESS_REVIEW_COMMENT_SCRIPT.exists():
-        run_command_with_error_notification(
-            [str(ADDRESS_REVIEW_COMMENT_SCRIPT), clipboard_content],
-            "Addressing GitHub review comment",
+    if GITHUB_REVIEW_COMMENT_URL_REGEX.fullmatch(clipboard_content):
+        run_github_workflow(
+            "de-address-review-comment",
             clipboard_content,
+            "Addressing GitHub review comment",
             "Failed to address GitHub review comment",
         )
         return
@@ -411,100 +546,10 @@ def main():
             subprocess.run(["xdg-open", clipboard_content])
         return
 
-    # If the clipboard content is a branch name in the authd repo, set up a worktree.
+    # Resolve branch names in the active IntelliJ project, falling back to authd.
     # The default shortcut opens it in Guake; the alternate shortcut opens IntelliJ.
-    if AUTHD_REPO.exists():
-        result = subprocess.run(
-            ["git", "for-each-ref", "--format=%(refname:short)",
-             f"refs/heads/{clipboard_content}",
-             f"refs/remotes/*/{clipboard_content}"],
-            cwd=AUTHD_REPO,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            worktree_dirname = clipboard_content.replace('/', '-')
-            worktree_path = AUTHD_REPO.parent / f"authd-{worktree_dirname}"
-            if run_command_with_error_notification(
-                ["authd-worktree", clipboard_content],
-                "Setting up authd worktree",
-                f"Branch: {clipboard_content}",
-                "Failed to set up authd worktree",
-                cwd=AUTHD_REPO,
-            ) != 0:
-                return
-            if ALT:
-                subprocess.Popen(["idea", str(worktree_path)])
-            else:
-                subprocess.run(
-                    ["gdbus", "call", "--session",
-                     "--dest", GUAKE_DBUS_DEST,
-                     "--object-path", GUAKE_DBUS_OBJECT,
-                     "--method", f"{GUAKE_DBUS_IFACE}.add_tab",
-                     str(worktree_path)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-                subprocess.run(
-                    ["gdbus", "call", "--session",
-                     "--dest", GUAKE_DBUS_DEST,
-                     "--object-path", GUAKE_DBUS_OBJECT,
-                     "--method", f"{GUAKE_DBUS_IFACE}.show"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-            return
-
-        # If the clipboard content is <remote>:<branch>, fetch the branch and
-        # set up a worktree
-        if clipboard_content.count(':') == 1:
-            remote, branch = clipboard_content.split(':', 1)
-            remotes_result = subprocess.run(
-                ["git", "remote"],
-                cwd=AUTHD_REPO,
-                capture_output=True,
-                text=True,
-            )
-            if remotes_result.returncode == 0 and remote in remotes_result.stdout.splitlines():
-                worktree_dirname = branch.replace('/', '-')
-                worktree_path = AUTHD_REPO.parent / f"authd-{worktree_dirname}"
-                notify("Fetching and setting up authd worktree",
-                       f"Remote: {remote}, Branch: {branch}")
-                fetch_result = subprocess.run(
-                    ["git", "fetch", remote, branch],
-                    cwd=AUTHD_REPO,
-                    capture_output=True,
-                    text=True,
-                )
-                if fetch_result.returncode != 0:
-                    notify("Failed to fetch branch",
-                           fetch_result.stderr.strip() or clipboard_content)
-                    return
-                if run_command_with_error_notification(
-                    ["authd-worktree", branch],
-                    "Setting up authd worktree",
-                    f"Remote: {remote}, branch: {branch}",
-                    "Failed to set up authd worktree",
-                    cwd=AUTHD_REPO,
-                ) != 0:
-                    return
-                if ALT:
-                    subprocess.Popen(["idea", str(worktree_path)])
-                else:
-                    subprocess.run(
-                        ["gdbus", "call", "--session",
-                         "--dest", GUAKE_DBUS_DEST,
-                         "--object-path", GUAKE_DBUS_OBJECT,
-                         "--method", f"{GUAKE_DBUS_IFACE}.add_tab",
-                         str(worktree_path)],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    )
-                    subprocess.run(
-                        ["gdbus", "call", "--session",
-                         "--dest", GUAKE_DBUS_DEST,
-                         "--object-path", GUAKE_DBUS_OBJECT,
-                         "--method", f"{GUAKE_DBUS_IFACE}.show"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    )
-                return
+    if open_branch_worktree(clipboard_content):
+        return
 
     # If the clipboard content is a Jira issue key, open the issue in the browser
     match = JIRA_ISSUE_REGEX.match(clipboard_content)
