@@ -9,6 +9,7 @@ profile debian-user-config-copilot-e2e-libvirt @{HOME}/.local/libexec/debian-use
     network,
     unix,
     signal,
+    ptrace (read) peer=debian-user-config-copilot-e2e-qemu,
 
     /usr/ rix,
     /usr/**/ rix,
@@ -45,6 +46,7 @@ profile debian-user-config-copilot-e2e-libvirt @{HOME}/.local/libexec/debian-use
     /proc/sys/vm/overcommit_memory r,
     owner /proc/[0-9]*/ rix,
     owner /proc/[0-9]*/stat r,
+    owner /proc/[0-9]*/task/[0-9]*/{stat,sched} r,
     owner /proc/[0-9]*/status r,
     owner /proc/[0-9]*/attr/current r,
     owner /proc/[0-9]*/cmdline r,
@@ -112,6 +114,7 @@ profile debian-user-config-copilot-e2e-qemu flags=(attach_disconnected,mediate_d
     signal (send, receive) peer=debian-user-config-copilot-e2e-libvirt,
     signal (send, receive) peer=debian-user-config-copilot-e2e-qemu,
     signal (receive) peer=unconfined,
+    ptrace (readby) peer=debian-user-config-copilot-e2e-libvirt,
 
     /usr/ rix,
     /usr/**/ rix,
