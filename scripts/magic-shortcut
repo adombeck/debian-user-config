@@ -122,25 +122,27 @@ def run_github_workflow(tool, url, title, failure_title):
 
 
 def open_branch_worktree(clipboard_content):
-    repo = current_project() or AUTHD_REPO
-    if not repo.exists():
-        return False
-    result = subprocess.run(
-        ["git", "--no-pager", "for-each-ref", "--format=%(refname:short)",
-         f"refs/heads/{clipboard_content}", f"refs/remotes/*/{clipboard_content}"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    branch = clipboard_content
-    remote = None
-    if result.returncode != 0 or not result.stdout.strip():
-        if clipboard_content.count(":") != 1:
-            return False
-        remote, branch = clipboard_content.split(":", 1)
-        remotes = subprocess.run(
-            ["git", "--no-pager", "remote"], cwd=repo, capture_output=True, text=True,
+    for repo in (AUTHD_REPO, Path.home() / "projects/adsys"):
+        if not (repo / ".git").exists():
+            continue
+        result = subprocess.run(
+            ["git", "--no-pager", "for-each-ref", "--format=%(refname:short)",
+             f"refs/heads/{clipboard_content}", f"refs/remotes/*/{clipboard_content}"],
+            cwd=repo, capture_output=True, text=True,
         )
-        if remotes.returncode != 0 or remote not in remotes.stdout.splitlines():
-            return False
+        branch = clipboard_content
+        remote = None
+        if result.returncode == 0 and result.stdout.strip():
+            break
+        if clipboard_content.count(":") == 1:
+            remote, branch = clipboard_content.split(":", 1)
+            remotes = subprocess.run(
+                ["git", "--no-pager", "remote"], cwd=repo, capture_output=True, text=True,
+            )
+            if remotes.returncode == 0 and remote in remotes.stdout.splitlines():
+                break
+    else:
+        return False
 
     try:
         command = [desktop_tool("de-worktree"), "-C", str(repo), "--intellij"]
@@ -546,7 +548,7 @@ def main():
             subprocess.run(["xdg-open", clipboard_content])
         return
 
-    # Resolve branch names in the active IntelliJ project, falling back to authd.
+    # Resolve branch names in authd, then adsys.
     # The default shortcut opens it in Guake; the alternate shortcut opens IntelliJ.
     if open_branch_worktree(clipboard_content):
         return

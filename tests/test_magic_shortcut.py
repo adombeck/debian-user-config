@@ -122,6 +122,78 @@ class RepositoryRoutingTests(unittest.TestCase):
                 tool.unlink()
                 self.assertEqual(shortcut.desktop_tool("de-fix-issue"), "/path/de-fix-issue")
 
+    def test_branch_in_another_checkout_opens_its_worktree_in_guake(self):
+        authd = self.checkout("authd", "git@github.com:canonical/authd.git")
+        adsys = self.checkout("adsys", "git@github.com:ubuntu/adsys.git")
+        subprocess.run(
+            ["git", "-C", str(adsys), "-c", "user.name=Test",
+             "-c", "user.email=test@example.invalid", "commit", "--quiet",
+             "--allow-empty", "-m", "Initial commit"],
+            check=True,
+        )
+        branch = "debug-ci-job-41462618184-125335558243"
+        worktree = self.projects / f"adsys-{branch}"
+        subprocess.run(
+            ["git", "-C", str(adsys), "worktree", "add", "--quiet", "-b", branch,
+             str(worktree)], check=True,
+        )
+        real_run = subprocess.run
+
+        def run_command(command, **kwargs):
+            if command[0] == "/tools/de-worktree":
+                return subprocess.CompletedProcess(command, 0, str(worktree) + "\n", "")
+            if command[0] == "gdbus":
+                return subprocess.CompletedProcess(command, 0)
+            return real_run(command, **kwargs)
+
+        for active in (None, authd):
+            with self.subTest(active=active):
+                if active:
+                    self.active_project(active)
+                with (
+                    patch.object(shortcut, "AUTHD_REPO", authd),
+                    patch.object(shortcut, "desktop_tool", return_value="/tools/de-worktree"),
+                    patch.object(shortcut, "notify"),
+                    patch.object(shortcut, "ALT", False),
+                    patch.object(shortcut.subprocess, "run", side_effect=run_command) as run,
+                ):
+                    self.assertTrue(shortcut.open_branch_worktree(branch))
+                commands = [call.args[0] for call in run.call_args_list]
+                self.assertIn([
+                    "/tools/de-worktree", "-C", str(adsys), "--intellij", branch,
+                ], commands)
+                self.assertEqual(commands[-2][-2:], [
+                    f"{shortcut.GUAKE_DBUS_IFACE}.add_tab", str(worktree),
+                ])
+                self.assertEqual(commands[-1][-1], f"{shortcut.GUAKE_DBUS_IFACE}.show")
+
+    def test_unknown_branch_does_not_launch_a_worktree(self):
+        authd = self.checkout("authd", "git@github.com:canonical/authd.git")
+        self.checkout("adsys", "git@github.com:ubuntu/adsys.git")
+        self.active_project(authd)
+        with (
+            patch.object(shortcut, "AUTHD_REPO", authd),
+            patch.object(shortcut, "desktop_tool") as tool,
+        ):
+            self.assertFalse(shortcut.open_branch_worktree("missing-branch"))
+        tool.assert_not_called()
+
+    def test_branch_search_ignores_other_checkouts_even_when_active(self):
+        authd = self.checkout("authd", "git@github.com:canonical/authd.git")
+        adsys = self.checkout("adsys", "git@github.com:ubuntu/adsys.git")
+        other = self.checkout("other", "git@github.com:someone/other.git")
+        self.active_project(other)
+        with (
+            patch.object(shortcut, "AUTHD_REPO", authd),
+            patch.object(shortcut.subprocess, "run", wraps=subprocess.run) as run,
+            patch.object(shortcut, "desktop_tool") as tool,
+        ):
+            self.assertFalse(shortcut.open_branch_worktree("topic"))
+        self.assertEqual([call.kwargs["cwd"] for call in run.call_args_list], [
+            authd, adsys,
+        ])
+        tool.assert_not_called()
+
 
 class ClipboardDispatchTests(unittest.TestCase):
     def dispatch(self, url, status=0):
@@ -180,13 +252,14 @@ class ClipboardDispatchTests(unittest.TestCase):
 
 
 class BranchWorktreeTests(unittest.TestCase):
-    def test_active_repository_and_reported_worktree_path_are_used(self):
+    def test_authd_repository_and_reported_worktree_path_are_used(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
+            (path / ".git").touch()
             for alternate in (False, True):
                 with (
                     self.subTest(alternate=alternate),
-                    patch.object(shortcut, "current_project", return_value=path),
+                    patch.object(shortcut, "AUTHD_REPO", path),
                     patch.object(shortcut, "desktop_tool", return_value="/tools/de-worktree"),
                     patch.object(shortcut, "notify"),
                     patch.object(shortcut, "ALT", alternate),
@@ -209,7 +282,7 @@ class BranchWorktreeTests(unittest.TestCase):
 
     def test_remote_fetch_failure_does_not_create_worktree(self):
         with (
-            patch.object(shortcut, "current_project", return_value=Path("/repo")),
+            patch.object(shortcut, "AUTHD_REPO", Path("/repo")),
             patch.object(shortcut.Path, "exists", return_value=True),
             patch.object(shortcut, "desktop_tool", return_value="/tools/de-worktree"),
             patch.object(shortcut.subprocess, "run", side_effect=[
